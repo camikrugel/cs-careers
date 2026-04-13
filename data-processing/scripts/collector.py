@@ -57,6 +57,5 @@ for sub in ["csMajors", "cscareerquestions"]:
 
 print(f"Total posts: {len(all_posts)}")
 
-# 存到本地 / 上传 S3
 with open("raw_posts.json", "w") as f:
     json.dump(all_posts, f)
