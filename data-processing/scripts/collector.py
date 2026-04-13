@@ -43,11 +43,10 @@ def fetch_posts(subreddit, listing="new", limit_per_page=100, max_pages=10):
         if not after:
             break
         
-        time.sleep(1)  # 别打太快，礼貌一点
+        time.sleep(1)  
     
     return posts
 
-# 抓多个 subreddit 和 listing 类型
 all_posts = []
 for sub in ["csMajors", "cscareerquestions"]:
     for listing in ["new", "top"]:
