@@ -17,7 +17,7 @@ To ensure seamless collaboration and pipeline automation in the lab environment,
 - **Block Public Access:** Disabled.
 - **Bucket Policy:** Configured to allow `s3:GetObject`, `s3:ListBucket`, and `s3:PutObject` for all principals (`*`).
   
-> **⚠️ Note:** This configuration allows any contributor to upload processed data or logs directly to the bucket. While this simplifies the workflow for a lab setting, it should be restricted to specific IAM ARNs for production environments.
+> **Note:** This configuration allows any contributor to upload processed data or logs directly to the bucket. While this simplifies the workflow for a lab setting, it should be restricted to specific IAM ARNs for production environments.
 
 # Setup
 # Install required packages
