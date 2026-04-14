@@ -8,6 +8,17 @@ While some categories of discussion are expected (such as internships, interview
 
 To simulate a continuously updating system, the pipeline will periodically retrieve new Reddit posts through the Reddit API, allowing the analysis to update regularly in a near real-time manner.
 
+## Data Storage & Access (AWS S3)
+The project data is managed in the following AWS S3 bucket: `bigdata-career-project`.
+
+### Current Access Logic
+To ensure seamless collaboration and pipeline automation in the lab environment, the bucket is currently configured with **Full Public Access** (List, Get, and Put).
+
+- **Block Public Access:** Disabled.
+- **Bucket Policy:** Configured to allow `s3:GetObject`, `s3:ListBucket`, and `s3:PutObject` for all principals (`*`).
+  
+> **⚠️ Note:** This configuration allows any contributor to upload processed data or logs directly to the bucket. While this simplifies the workflow for a lab setting, it should be restricted to specific IAM ARNs for production environments.
+
 # Setup
 # Install required packages
 # Make sure to create new environment with python = 3.10
