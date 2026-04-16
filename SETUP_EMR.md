@@ -11,8 +11,10 @@ Configure:
 - **Applications:** Spark
 - **Instance Type:** m5.xlarge
 - **Instance Count:** 3
-- **Key Pair:** vockey
+- **Cluster logs:** uncheck "Publish cluster-specific logs to Amazon S3"
+- **Key Pair:** vockey (make a key pair + make sure to save it securely)
 - **EMR Service Role:** EMR_DefaultRole
+- **EMR Instance Profile:** EMR_EC2_DefaultRole
 
 Click **Create** and wait for "Waiting" status (~10 min)
 
@@ -23,7 +25,7 @@ In AWS Console:
 3. Configure:
    - **Type:** Spark application
    - **Location:** `s3://bigdata-cs-careers/scripts/process_reddit_data.py`
-   - **Arguments:** `--mode emr --s3-bucket bigdata-cs-careers`
+   - **Arguments:** `--mode emr --s3-bucket bigdata-cs-careers --local-output-dir`
    - **Step action:** Continue
 4. Click **Add Step**
 

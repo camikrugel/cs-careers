@@ -27,8 +27,6 @@ parser.add_argument('--mode', choices=['local', 'emr'], default='local',
                     help='Execution mode: local (default) or emr')
 parser.add_argument('--s3-bucket', type=str, default='bigdata-cs-careers',
                     help='S3 bucket name (input data only - no writes)')
-parser.add_argument('--s3-prefix', type=str, default='',
-                    help='S3 prefix/path for input data (e.g., "reddit-data/")')
 parser.add_argument('--local-output-dir', type=str, default='data/processed/',
                     help='Local directory to save results')
 
@@ -37,7 +35,6 @@ args = parser.parse_args()
 # CONFIGURATION
 LOCAL_MODE = args.mode == 'local'
 S3_BUCKET = args.s3_bucket
-S3_PREFIX = args.s3_prefix.rstrip('/') + '/' if args.s3_prefix else ''
 LOCAL_OUTPUT_DIR = args.local_output_dir
 
 if LOCAL_MODE:
@@ -45,12 +42,16 @@ if LOCAL_MODE:
     INPUT_PATH = "data/raw_posts.json"  # Local file path
     OUTPUT_PATH = "data/processed/"      # Local directory
 else:
-    print("\n Running in EMR MODE")
-    print(f"   Input from S3: s3://{S3_BUCKET}/{S3_PREFIX}raw_posts.json")
+    print("\n  Running in EMR MODE")
+    print(f"   Input from S3: s3://{S3_BUCKET}/raw_posts.json")
     print(f"   Results saved to: /tmp/reddit-results/ (on EMR master)")
     print(f"   Download to local: {LOCAL_OUTPUT_DIR}")
-    INPUT_PATH = f"s3://{S3_BUCKET}/{S3_PREFIX}raw_posts.json"
+    INPUT_PATH = f"s3://{S3_BUCKET}/raw_posts.json"
     OUTPUT_PATH = "/tmp/reddit-results/"  # Local to EMR cluster (no S3 writes)
+
+# Ensure output directory exists
+os.makedirs(OUTPUT_PATH, exist_ok=True)
+print(f"\n Output directory ready: {OUTPUT_PATH}")
 
 # Define all possible industries upfront 
 ALL_INDUSTRIES = [
