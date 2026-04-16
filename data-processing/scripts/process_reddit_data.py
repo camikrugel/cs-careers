@@ -150,7 +150,7 @@ else:
 
 spark.sparkContext.setLogLevel("WARN")
 
-print(f"✓ Spark Session initialized")
+print(f" Spark Session initialized")
 print(f"  Spark Version: {spark.version}")
 print(f"  Master: {spark.sparkContext.master}")
 print(f"  Input Path: {INPUT_PATH}")
@@ -548,7 +548,7 @@ topic_by_industry = df_topic_industry.groupBy("industry", "topic") \
     ) \
     .orderBy("industry", desc("post_count"))
 
-print("\n✓ Topics by Industry:")
+print("\n Topics by Industry:")
 topic_by_industry.show(50, truncate=False)
 
 
