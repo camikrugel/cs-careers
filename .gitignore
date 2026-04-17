@@ -1,6 +1,10 @@
 # Secrets
 .streamlit/secrets.toml
 
+# Lambda build artifacts
+lambda_package/
+collector_lambda.zip
+
 # Data files (can be large)
 data/
 
