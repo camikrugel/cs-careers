@@ -53,7 +53,7 @@ This project uses **AWS Academy Learner Lab**, which issues temporary STS creden
 In the AWS Academy portal, click **Start Lab** and wait for the indicator to turn green.
 
 ### Step 2 — Get your credentials
-Click **AWS Details** → **Show** next to "AWS CLI". You will see three values:
+Click **AWS Details** -> **Show** next to "AWS CLI". You will see three values:
 - `aws_access_key_id`
 - `aws_secret_access_key`
 - `aws_session_token`
@@ -83,7 +83,7 @@ secret_access_key = "YOUR_SECRET_ACCESS_KEY"
 session_token     = "YOUR_SESSION_TOKEN"
 ```
 
-> **Note:** `.streamlit/secrets.toml` is gitignored and never committed. For the deployed Streamlit app, add these same values in the app dashboard under **Settings → Secrets**.
+> **Note:** `.streamlit/secrets.toml` is gitignored and never committed. For the deployed Streamlit app, add these same values in the app dashboard under **Settings -> Secrets**.
 
 ---
 
@@ -93,7 +93,7 @@ The Lambda function (`collector.py`) runs automatically every day at 6:00 AM UTC
 
 ### Lambda function setup
 
-1. In the AWS Console, go to **Lambda → Create function**
+1. In the AWS Console, go to **Lambda -> Create function**
    - Name: `cs-career-collector`
    - Runtime: Python 3.9
    - Execution role: `LabRole` (existing role — do not create a new one)
@@ -103,7 +103,7 @@ The Lambda function (`collector.py`) runs automatically every day at 6:00 AM UTC
    cd data-processing/scripts
    zip collector_lambda.zip collector.py
    ```
-   In the Lambda console: **Code → Upload from → .zip file** → select `collector_lambda.zip`
+   In the Lambda console: **Code → Upload from -> .zip file** → select `collector_lambda.zip`
 
 3. Add the `requests` layer or set the handler to include dependencies. Alternatively, build a full package:
    ```bash
@@ -114,7 +114,7 @@ The Lambda function (`collector.py`) runs automatically every day at 6:00 AM UTC
 
 4. Set the handler to `collector.lambda_handler`
 
-5. Under **Configuration → General**:
+5. Under **Configuration -> General**:
    - Memory: 512 MB
    - Timeout: 5 minutes
 
@@ -188,9 +188,9 @@ The app auto-detects the most recent processed date in S3 and loads all charts.
 ### Deployed on Streamlit Community Cloud
 
 1. Push code to GitHub (secrets.toml is gitignored — never committed)
-2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app** → connect your repo
+2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app** -> connect your repo
 3. Set main file to `app.py`
-4. Under **Settings → Secrets**, paste the contents of your `.streamlit/secrets.toml`
+4. Under **Settings -> Secrets**, paste the contents of your `.streamlit/secrets.toml`
 5. Deploy
 
 > **Each new Learner Lab session:** update the secrets in the Streamlit app dashboard — credentials expire with the lab session.
