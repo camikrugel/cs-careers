@@ -1,0 +1,14 @@
+# Secrets
+.streamlit/secrets.toml
+
+# Data files (can be large)
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Jupyter
+.ipynb_checkpoints/

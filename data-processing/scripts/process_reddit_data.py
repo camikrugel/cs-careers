@@ -13,7 +13,8 @@ import json
 import os
 import sys
 import argparse
-import subprocess
+import boto3
+from datetime import datetime, timezone
 from pathlib import Path
 
 if sys.platform.startswith('win'):
@@ -21,37 +22,59 @@ if sys.platform.startswith('win'):
     os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
     print(f" Windows detected - using Python from: {sys.executable}")
 
-# COMMAND-LINE ARGUMENTS
-parser = argparse.ArgumentParser(description='Process Reddit career data with PySpark')
-parser.add_argument('--mode', choices=['local', 'emr'], default='local',
-                    help='Execution mode: local (default) or emr')
-parser.add_argument('--s3-bucket', type=str, default='bigdata-cs-careers',
-                    help='S3 bucket name (input data only - no writes)')
-parser.add_argument('--local-output-dir', type=str, default='data/processed/',
-                    help='Local directory to save results')
+S3_BUCKET = "bigdata-cs-careers"
 
+parser = argparse.ArgumentParser(description='Process Reddit career data with PySpark')
+parser.add_argument('--date', type=str,
+                    default=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                    help='Date to process in YYYY-MM-DD format (default: today UTC)')
 args = parser.parse_args()
+DATE_STR = args.date
+
+
+def download_from_s3(date_str):
+    """Download raw posts JSON from S3, or use local file if already present."""
+    os.makedirs("data", exist_ok=True)
+    local_dated = f"data/raw_posts_{date_str}.json"
+    if os.path.exists(local_dated):
+        print(f"\n[S3] Local file found, skipping download: {local_dated}")
+        return local_dated
+    s3_key = f"raw/{date_str}/posts.json"
+    local_path = "data/raw_posts_temp.json"
+    print(f"\n[S3] Downloading s3://{S3_BUCKET}/{s3_key} ...")
+    boto3.client("s3").download_file(S3_BUCKET, s3_key, local_path)
+    print(f"     Saved to {local_path}")
+    return local_path
+
+
+def upload_processed_to_s3(date_str, local_dir="data/processed/"):
+    """Upload all processed CSVs from local_dir to s3://bucket/processed/{date}/."""
+    s3 = boto3.client("s3")
+    uploaded = 0
+    print(f"\n[S3] Uploading processed data to s3://{S3_BUCKET}/processed/{date_str}/")
+    for root, _, files in os.walk(local_dir):
+        for fname in files:
+            if not fname.endswith(".csv"):
+                continue
+            local_file = os.path.join(root, fname)
+            rel_path = os.path.relpath(local_file, local_dir).replace("\\", "/")
+            s3_key = f"processed/{date_str}/{rel_path}"
+            s3.upload_file(local_file, S3_BUCKET, s3_key)
+            print(f"     Uploaded {s3_key}")
+            uploaded += 1
+    print(f"[S3] Done — {uploaded} files uploaded.")
+
 
 # CONFIGURATION
-LOCAL_MODE = args.mode == 'local'
-S3_BUCKET = args.s3_bucket
-LOCAL_OUTPUT_DIR = args.local_output_dir
+INPUT_PATH = download_from_s3(DATE_STR)
+OUTPUT_PATH = "data/processed/"
 
-if LOCAL_MODE:
-    print("\n Running in LOCAL MODE")
-    INPUT_PATH = "data/raw_posts.json"  # Local file path
-    OUTPUT_PATH = "data/processed/"      # Local directory
-else:
-    print("\n  Running in EMR MODE")
-    print(f"   Input from S3: s3://{S3_BUCKET}/raw_posts.json")
-    print(f"   Results saved to: /tmp/reddit-results/ (on EMR master)")
-    print(f"   Download to local: {LOCAL_OUTPUT_DIR}")
-    INPUT_PATH = f"s3://{S3_BUCKET}/raw_posts.json"
-    OUTPUT_PATH = "/tmp/reddit-results/"  # Local to EMR cluster (no S3 writes)
+print(f"\n Processing date: {DATE_STR}")
+print(f"   Input:  {INPUT_PATH}")
+print(f"   Output: {OUTPUT_PATH}")
 
 # Ensure output directory exists
 os.makedirs(OUTPUT_PATH, exist_ok=True)
-print(f"\n Output directory ready: {OUTPUT_PATH}")
 
 # Define all possible industries upfront 
 ALL_INDUSTRIES = [
@@ -134,19 +157,12 @@ ADVICE_CATEGORIES = {
 # Start Spark session
 print("\n[INITIALIZATION] Starting Spark Session...")
 
-if LOCAL_MODE:
-    spark = SparkSession.builder \
-        .appName("Reddit CS Career Analysis - Local") \
-        .master("local[*]") \
-        .config("spark.driver.memory", "4g") \
-        .config("spark.sql.shuffle.partitions", "8") \
-        .getOrCreate()
-else:
-    spark = SparkSession.builder \
-        .appName("Reddit CS Career Analysis - EMR") \
-        .config("spark.sql.adaptive.enabled", "true") \
-        .config("spark.sql.adaptive.coalescePartitions.enabled", "true") \
-        .getOrCreate()
+spark = SparkSession.builder \
+    .appName("Reddit CS Career Analysis") \
+    .master("local[1]") \
+    .config("spark.driver.memory", "4g") \
+    .config("spark.sql.shuffle.partitions", "4") \
+    .getOrCreate()
 
 spark.sparkContext.setLogLevel("WARN")
 
@@ -162,17 +178,16 @@ print(f"  Output Path: {OUTPUT_PATH}")
 print(f"\n[STEP 1] Loading raw Reddit data from: {INPUT_PATH}")
 
 try:
-    df = spark.read.json(INPUT_PATH)
+    with open(INPUT_PATH, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    df = spark.createDataFrame(raw)
     initial_count = df.count()
     print(f" Loaded {initial_count} posts")
     print("\nData Schema:")
     df.printSchema()
 except Exception as e:
     print(f" Error loading data: {e}")
-    if LOCAL_MODE:
-        print("Make sure 'data/raw_posts.json' exists in your project directory")
-    else:
-        print("Make sure the S3 path is correct and you have proper credentials")
+    print("Make sure the input JSON file exists and contains a valid list of posts.")
     spark.stop()
     sys.exit(1)
 
@@ -446,6 +461,8 @@ word_freq.show(20, truncate=False)
 
 # Define topic categorization function
 def categorize_topic(text):
+    if not text:
+        return ['General']
     text_lower = text.lower()
     categories = []
     
@@ -1161,36 +1178,6 @@ print("="*60)
 spark.stop()
 print("\n Spark session stopped. Analysis complete!")
 
-# 14. POST-PROCESSING INSTRUCTIONS (EMR MODE ONLY)
-if not LOCAL_MODE:
-    print("\n" + "="*60)
-    print("RESULTS READY ON EMR CLUSTER")
-    print("="*60)
-    
-    datasets = [
-        "topic_analysis",
-        "sentiment_by_topic",
-        "posts_by_industry",
-        "salary_stats",
-        "experience_distribution",
-        "skills_summary",
-        "temporal_trends",
-        "network_metrics"
-    ]
-    
-    print("\n Results saved to: /tmp/reddit-results/ (on EMR master node)")
-    print("\nTo download results to your local machine:")
-    print("\n  Option 1 - Using SCP (if you have SSH key):")
-    print("    scp -r ec2-user@<master-public-ip>:/tmp/reddit-results/* ./data/processed/")
-    print("\n  Option 2 - Using EMR Proxy:")
-    print("    aws emr ssh --cluster-id <cluster-id>")
-    print("    Then copy files from /tmp/reddit-results/")
-    print("\n  Option 3 - Using AWS Console:")
-    print("    Go to EMR > Clusters > Applications > Hive")
-    print("    Use Hive Query Editor or download files directly")
-    print("\nDatasets generated:")
-    for i, dataset in enumerate(datasets, 1):
-        print(f"    {i}. {dataset}/")
-    
-    print(f"\n Results location: /tmp/reddit-results/")
-    print(f" For Streamlit: Download CSV files and place in data/processed/")
+# Upload processed CSVs to S3
+upload_processed_to_s3(DATE_STR)
+

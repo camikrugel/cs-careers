@@ -1,20 +1,23 @@
 topic,sentiment,count
-Big Tech,Positive,14
-Big Tech,Neutral,13
+Big Tech,Neutral,16
+Big Tech,Positive,12
 Big Tech,Negative,1
 Challenges,Negative,6
-Compensation,Neutral,10
-Compensation,Positive,8
-Education,Neutral,11
+Compensation,Neutral,9
+Compensation,Positive,5
+Compensation,Negative,1
+Education,Neutral,10
 Education,Positive,3
-General,Neutral,41
-Internship,Positive,27
-Internship,Neutral,3
+General,Neutral,43
+Internship,Positive,26
+Internship,Neutral,1
 Interview Prep,Neutral,30
-Interview Prep,Positive,11
-Interview Prep,Negative,3
-Job Search,Neutral,12
-Job Search,Positive,7
+Interview Prep,Positive,8
+Interview Prep,Negative,2
+Job Search,Neutral,10
+Job Search,Positive,5
+Resume/Profile,Positive,3
 Resume/Profile,Neutral,2
 Seeking Advice,Neutral,24
-Seeking Advice,Positive,6
+Seeking Advice,Positive,5
+Seeking Advice,Negative,1

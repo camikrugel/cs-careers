@@ -1,235 +1,232 @@
-# Reddit CS Career Data Analysis
+# Reddit CS Career Intelligence
 
-## Project Overview
-
-This project processes Reddit posts from CS career communities to extract insights about salaries, job search trends, required skills, and industry sentiment. The data is processed using Apache Spark and can run locally or on AWS EMR for distributed processing.
-
-Original Data Source: Reddit posts from r/cscareerquestions, r/cscq, and related subreddits
-Input: raw_posts.json 
-Output: 8 analytical CSV datasets
+Automated pipeline that collects Reddit discussions from r/csMajors and r/cscareerquestions daily, processes them with PySpark, and visualizes career insights through a Streamlit dashboard hosted on Streamlit Community Cloud.
 
 ---
 
-## Quick Start
+## Architecture
 
-### Option 1: Local Processing (Development)
+```
+CloudWatch (daily 6 AM UTC)
+  → AWS Lambda (collector.py)
+  → s3://bigdata-cs-careers/raw/YYYY-MM-DD/posts.json
 
-Prerequisites (Choose One):
+python process_reddit_data.py --date YYYY-MM-DD   (run manually)
+  → downloads raw JSON from S3
+  → PySpark local processing
+  → uploads 8 CSVs to s3://bigdata-cs-careers/processed/YYYY-MM-DD/
 
-**Option A: Using Conda (Recommended)**
-```bash
-# Create environment from file
-conda env create -f environment.yml
-
-# Activate environment
-conda activate reddit-career-analysis
+Streamlit Community Cloud (app.py)
+  → reads processed CSVs from S3 via s3fs
+  → renders interactive dashboard
 ```
 
-**Option B: Using Pip**
+---
+
+## Prerequisites
+
+- Python 3.9+ with conda or pip
+- AWS Learner Lab session (active)
+- Java 8 or 11 (required by PySpark)
+
+### Install dependencies
+
+**Conda (recommended):**
+```bash
+conda env create -f environment.yml
+conda activate reddit-career-analysis
+```
+OR 
+
+**Pip:**
 ```bash
 pip install -r requirements.txt
 ```
 
-Run:
+---
+
+## AWS Credentials Setup
+
+This project uses **AWS Academy Learner Lab**, which issues temporary STS credentials that expire every ~4 hours when the lab session ends. You must refresh credentials each new lab session.
+
+### Step 1 — Start your Learner Lab session
+In the AWS Academy portal, click **Start Lab** and wait for the indicator to turn green.
+
+### Step 2 — Get your credentials
+Click **AWS Details** → **Show** next to "AWS CLI". You will see three values:
+- `aws_access_key_id`
+- `aws_secret_access_key`
+- `aws_session_token`
+
+### Step 3 — Configure the AWS CLI
 ```bash
-python data-processing/scripts/process_reddit_data.py --mode local
+aws configure
 ```
+Enter your access key and secret key when prompted. Set region to `us-east-1`. Leave output format blank.
 
-Output: data/processed/ (all 8 CSVs)
-Time: 5-10 minutes (depends on system specs)
-
-### Option 2: AWS EMR (Production)
-
-Prerequisites:
-- AWS Learner Lab access
-- SSH key pair (vockey)
-
-Steps:
-1. Follow full instructions: SETUP_EMR.md
-2. Create EMR cluster with 3 x m5.xlarge instances
-3. Submit Spark job pointing to s3://bigdata-cs-careers/scripts/process_reddit_data.py
-4. Download results via SCP (10-15 minutes)
-
-Permissions Required:
-- S3 READ: bigdata-cs-careers/raw_posts.json
-- S3 READ: bigdata-cs-careers/scripts/process_reddit_data.py
-- EMR cluster management
-- NO S3 write permissions needed
-
----
-
-## Analytics Generated
-
-The pipeline produces 8 CSV datasets with actionable insights:
-
-### 1. Topic Analysis (topic_analysis.csv)
-- Breaks down post distribution by topic category
-- Topics: internship, interview, salary, job_search, resume, projects, courses, new_grad, faang
-- Metrics: post count, percentage distribution
-
-### 2. Sentiment by Topic (sentiment_by_topic.csv)
-- Sentiment analysis (positive/neutral/negative) per topic
-- Identifies which topics have most positive/negative sentiment
-- Useful for: Understanding community sentiment on different career topics
-
-### 3. Posts by Industry (posts_by_industry.csv)
-- Career field distribution (FAANG, startups, BigTech, etc.)
-- Post counts per industry
-- Useful for: Market trend analysis
-
-### 4. Salary Statistics (salary_stats.csv)
-- Average, min, max salaries by industry
-- Salary mention frequency
-- Distribution analysis
-- Useful for: Compensation benchmarking
-
-### 5. Experience Distribution (experience_distribution.csv)
-- Posts categorized by career level (intern, entry, mid, senior, exec)
-- Post frequency per level
-- Useful for: Understanding which career stages discuss Reddit most
-
-### 6. Skills Summary (skills_summary.csv)
-- Ranked list of most mentioned skills/technologies
-- Includes: Python, Java, C++, JavaScript, React, AWS, Docker, Kubernetes, etc.
-- Metrics: mention count, popularity ranking
-- Useful for: Resume optimization, hiring trends
-
-### 7. Temporal Trends (temporal_trends.csv)
-- Post volume over time (by month)
-- Sentiment trends by month
-- Useful for: Identifying seasonal patterns in job market
-
-### 8. Network Metrics (network_metrics.csv)
-- Aggregate statistics: total posts, avg length, engagement patterns
-- Text statistics: average words per post, title length
-- Useful for: High-level dataset overview
-
----
-
-## Data Processing Pipeline
-
-The pipeline applies 12 sequential transformations:
-
-1. JSON Loading - Parse raw Reddit posts from S3 or local file
-2. Text Cleaning - Remove URLs, markdown, special chars; normalize text
-3. Topic Classification - Regex-based categorization (9 topics)
-4. Salary Extraction - Parse salary mentions (patterns: $120k, tc: 120k)
-5. Sentiment Analysis - TextBlob polarity/subjectivity scores
-6. Industry Detection - Identify target career fields
-7. Experience Level Extraction - Parse career stage from text
-8. Skill Extraction - Identify 50+ programming languages/frameworks
-9. Topic-Sentiment Aggregation - Group sentiment by topic
-10. Industry Statistics - Salary/post aggregations by industry
-11. Temporal Analysis - Group posts by month for trends
-12. Final Export - Write 8 CSV files
-
-Key Transformation Details
-
-Text Cleaning Pipeline:
-- Removes URLs, emails, Reddit markdown
-- Converts to lowercase
-- Removes HTML entities
-- Filters stopwords (the, a, an, etc.)
-
-Salary Extraction Patterns:
-- $120k, $120K becomes 120,000
-- $120,000 becomes 120,000
-- tc: 120k, total comp: 120k becomes 120,000
-- Validates range: 30k-500k (outliers excluded)
-
-Skill Detection:
-- 50+ programming languages/frameworks
-- Includes: Python, Java, JavaScript, C++, Go, Rust, etc.
-- Frameworks: React, Django, Spring, Vue, etc.
-- Cloud: AWS, GCP, Azure
-- DevOps: Docker, Kubernetes, Terraform, etc.
-
----
-
-## Usage Examples
-
-Run Locally:
+Then set the session token (required for Learner Lab — `aws configure` does not prompt for this):
 ```bash
-python data-processing/scripts/process_reddit_data.py --mode local
+aws configure set aws_session_token YOUR_SESSION_TOKEN
 ```
 
-Run on EMR:
+Verify it works:
 ```bash
-python data-processing/scripts/process_reddit_data.py \
-  --mode emr \
-  --s3-bucket bigdata-cs-careers \
-  --local-output-dir /tmp/reddit-results/
+aws s3 ls s3://bigdata-cs-careers/
 ```
 
-Integration with Streamlit (Downstream):
-```python
-import pandas as pd
-
-salary = pd.read_csv('data/processed/salary_stats/salary_stats.csv')
-skills = pd.read_csv('data/processed/skills_summary/skills_summary.csv')
-
-# Build visualizations in Streamlit
+### Step 4 — Update Streamlit secrets
+Edit `.streamlit/secrets.toml` with the same three credential values:
+```toml
+[aws]
+access_key_id     = "YOUR_ACCESS_KEY_ID"
+secret_access_key = "YOUR_SECRET_ACCESS_KEY"
+session_token     = "YOUR_SESSION_TOKEN"
 ```
+
+> **Note:** `.streamlit/secrets.toml` is gitignored and never committed. For the deployed Streamlit app, add these same values in the app dashboard under **Settings → Secrets**.
 
 ---
 
-## Technical Details
+## AWS Lambda — Automated Daily Collection
 
-Languages & Libraries:
-- Apache Spark 3.x (PySpark)
-- Python 3.9+
-- TextBlob (sentiment analysis)
-- Pandas (local output)
+The Lambda function (`collector.py`) runs automatically every day at 6:00 AM UTC via a CloudWatch Events rule.
 
-Processing Performance:
-- Local: 5-10 minutes
-- EMR (3x m5.xlarge): 10-15 minutes
+### Lambda function setup
 
-Data Volume:
-- Input: 50MB+ JSON
-- Output: 10-20MB CSV (8 files)
+1. In the AWS Console, go to **Lambda → Create function**
+   - Name: `cs-career-collector`
+   - Runtime: Python 3.9
+   - Execution role: `LabRole` (existing role — do not create a new one)
+
+2. Upload the deployment package:
+   ```bash
+   cd data-processing/scripts
+   zip collector_lambda.zip collector.py
+   ```
+   In the Lambda console: **Code → Upload from → .zip file** → select `collector_lambda.zip`
+
+3. Add the `requests` layer or set the handler to include dependencies. Alternatively, build a full package:
+   ```bash
+   pip install requests -t package/
+   cp collector.py package/
+   cd package && zip -r ../collector_lambda.zip .
+   ```
+
+4. Set the handler to `collector.lambda_handler`
+
+5. Under **Configuration → General**:
+   - Memory: 512 MB
+   - Timeout: 5 minutes
+
+### CloudWatch Events trigger (daily cron)
+
+1. In the Lambda console, click **Add trigger**
+2. Select **EventBridge (CloudWatch Events)**
+3. Create a new rule:
+   - Rule name: `cs-career-daily`
+   - Rule type: Schedule expression
+   - Expression: `cron(0 6 * * ? *)` — runs daily at 6:00 AM UTC
+4. Click **Add**
+
+### Test the Lambda function
+
+In the Lambda console, go to the **Test** tab:
+1. Create a new test event named `TestRun` with body `{}`
+2. Click **Test**
+
+Check the S3 bucket after it runs — you should see:
+```
+s3://bigdata-cs-careers/raw/YYYY-MM-DD/posts.json
+s3://bigdata-cs-careers/raw/YYYY-MM-DD/metadata.json
+```
+
+### Run the collector manually (local)
+
+You can also run the collector locally to collect and upload today's data:
+```bash
+python data-processing/scripts/collector.py
+```
+This saves data locally to `data/raw_posts_YYYY-MM-DD.json` and uploads to S3.
+
+---
+
+## Processing Data
+
+After data has been collected (either by Lambda or locally), run the processor:
+
+```bash
+python data-processing/scripts/process_reddit_data.py --date 2026-04-17
+```
+
+Replace the date with the date you want to process. Defaults to today's UTC date if omitted.
+
+**What it does:**
+1. Checks if `data/raw_posts_YYYY-MM-DD.json` exists locally — uses it if found (skips download)
+2. Otherwise downloads `raw/YYYY-MM-DD/posts.json` from S3
+3. Runs PySpark locally (single-threaded, 4 GB driver memory)
+4. Saves 8 CSV datasets to `data/processed/`
+5. Uploads all CSVs to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/`
+
+**Runtime:** ~5–10 minutes depending on system specs.
+
+> **Windows note:** The processor runs Spark in `local[1]` (single-threaded) mode to avoid Python UDF socket errors on Windows.
+
+---
+
+## Running the Streamlit Dashboard
+
+### Locally
+
+Make sure `.streamlit/secrets.toml` has valid credentials (see AWS Credentials Setup above), then:
+
+```bash
+streamlit run app.py
+```
+
+The app auto-detects the most recent processed date in S3 and loads all charts.
+
+### Deployed on Streamlit Community Cloud
+
+1. Push code to GitHub (secrets.toml is gitignored — never committed)
+2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app** → connect your repo
+3. Set main file to `app.py`
+4. Under **Settings → Secrets**, paste the contents of your `.streamlit/secrets.toml`
+5. Deploy
+
+> **Each new Learner Lab session:** update the secrets in the Streamlit app dashboard — credentials expire with the lab session.
+
+---
+
+## Outputs
+
+Eight CSV datasets are written to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/`:
+
+| Dataset | Description |
+|---|---|
+| `topic_analysis/` | Post count, avg score, avg comments per topic |
+| `sentiment_by_topic/` | Positive/Neutral/Negative post counts per topic |
+| `posts_by_industry/` | Post volume and engagement by industry |
+| `salary_stats/` | Salary mention counts and engagement by industry |
+| `experience_distribution/` | Post counts by experience level |
+| `skills_summary/` | Most mentioned programming skills and tools |
+| `temporal_trends/` | Monthly post volume and sentiment over time |
+| `network_metrics/` | Overall dataset statistics (total posts, comments, etc.) |
 
 ---
 
 ## Troubleshooting
 
-Local Mode Issues
+**`aws s3 ls` returns an error about credentials**
+→ Re-run `aws configure` and `aws configure set aws_session_token` with fresh Learner Lab credentials.
 
-Error: "Hadoop home directory not found"
-- This is expected on Windows/local. Pandas writer handles it.
+**Processor fails with `NoCredentialsError`**
+→ AWS CLI credentials have expired. Refresh them (see AWS Credentials Setup).
 
-Error: "raw_posts.json not found"
-- Ensure data/raw_posts.json exists with Reddit posts data
+**Streamlit app shows "No processed data found in S3"**
+→ The processor has not been run for any date yet, or the S3 credentials in secrets.toml are expired.
 
-EMR Mode Issues
+**Spark fails with `SocketException: Software caused connection abort`**
+→ Ensure `local[1]` is set in the SparkSession (not `local[*]`) — this is a known Windows issue with multi-threaded Python UDFs.
 
-See data-processing/README_EMR.md for detailed EMR troubleshooting
-
----
-
-## For Instructor
-
-This project demonstrates:
-- PySpark SQL transformations and aggregations
-- Distributed processing on AWS EMR
-- Cloud data pipeline architecture (S3 integration)
-- CLI argument handling and flexible configuration
-- Local vs cloud execution patterns
-- Data validation and error handling
-- Production-ready code structure
-
-Submission Package Includes:
-1. GitHub repo with all code
-2. SETUP_EMR.md - Quick start guide
-3. Public S3 bucket: bigdata-cs-careers (read-only access)
-4. Pre-loaded script in S3 (ready to submit)
-
----
-
-## Support & Documentation
-
-- EMR Setup: SETUP_EMR.md
-- Detailed EMR Guide: data-processing/README_EMR.md
-- Technical Architecture: EMR_IMPLEMENTATION.md
-- AWS EMR Docs: https://docs.aws.amazon.com/emr/
-- PySpark Docs: https://spark.apache.org/docs/latest/api/python/
+**Lambda times out**
+→ Increase timeout to 10 minutes in Lambda configuration. Collection of ~2000 posts typically takes 90–120 seconds.
