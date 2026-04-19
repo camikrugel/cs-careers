@@ -1,5 +1,51 @@
 # Data Schema
 
+---
+
+## Input Data
+
+**Source:** Reddit API (`reddit.com/r/{subreddit}/{listing}.json`)  
+**Location:** `s3://bigdata-cs-careers/raw/YYYY-MM-DD/posts.json`  
+**Format:** JSON array of post objects
+
+Each element in the array is one Reddit post with these fields:
+
+| Field | Type | Description |
+|---|---|---|
+| id | string | Reddit post ID (unique) |
+| title | string | Post title |
+| selftext | string | Post body text (empty string if link-only post) |
+| score | integer | Net upvotes (upvotes minus downvotes) |
+| created_utc | float | Unix timestamp of when post was created |
+| num_comments | integer | Number of comments on the post |
+| url | string | Post URL (permalink or external link) |
+| subreddit | string | `csMajors` or `cscareerquestions` |
+
+**Example record:**
+```json
+{
+  "id": "abc123",
+  "title": "Just got my first SWE offer from Google!",
+  "selftext": "Applied last October, went through 5 rounds...",
+  "score": 847,
+  "created_utc": 1713312000.0,
+  "num_comments": 142,
+  "url": "https://www.reddit.com/r/csMajors/comments/abc123/",
+  "subreddit": "csMajors"
+}
+```
+
+**Collection details:**
+- Subreddits: `r/csMajors`, `r/cscareerquestions`
+- Listings: `new` and `top` (both per subreddit)
+- Up to 1000 posts per subreddit/listing combination (10 pages × 100 posts)
+- Deduplicated by post `id` — each post appears once even if it appears in both `new` and `top`
+- Accompanied by `metadata.json` with collection timestamp and post count
+
+---
+
+## Output Data
+
 All 8 CSV datasets are written to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/` and mirrored locally to `data/processed/`. Each dataset lives in its own subfolder with a matching filename (e.g. `topic_analysis/topic_analysis.csv`).
 
 ---
