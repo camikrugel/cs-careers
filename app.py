@@ -70,6 +70,10 @@ def metric_val(name):
     row = metrics_df[metrics_df["metric"] == name]
     return int(row["value"].values[0]) if not row.empty else 0
 
+# --- Fetch Theme Variables ---
+# Pulling custom colors dynamically from .streamlit/config.toml
+custom_colors = st.get_option("theme.chartCategoricalColors")
+primary_color = st.get_option("theme.primaryColor")
 
 # --- Header ---
 st.title("Reddit CS Career Intelligence")
@@ -77,7 +81,40 @@ st.markdown("*Analyzing trends from r/csMajors and r/cscareerquestions using PyS
 
 # --- Sidebar ---
 st.sidebar.header("Pipeline Status")
-st.sidebar.success(f"Data from: `{latest_date}`")
+
+# 1. Evaluate the health of all 8 expected datasets
+data_health = {
+    "Topic Analysis": not topic_df.empty,
+    "Sentiment by Topic": not sentiment_df.empty,
+    "Posts by Industry": not industry_df.empty,
+    "Salary Stats": not salary_df.empty,
+    "Experience Dist.": not experience_df.empty,
+    "Skills Summary": not skills_df.empty,
+    "Temporal Trends": not temporal_df.empty,
+    "Network Metrics": not metrics_df.empty,
+}
+
+datasets_loaded = sum(data_health.values())
+total_datasets = len(data_health)
+
+# 2. Display high-level status indicator
+if datasets_loaded == total_datasets:
+    st.sidebar.success(f"**Healthy**: {datasets_loaded}/{total_datasets} datasets loaded")
+elif datasets_loaded > 0:
+    st.sidebar.warning(f"**Degraded**: Only {datasets_loaded}/{total_datasets} datasets loaded")
+else:
+    st.sidebar.error(f"**Critical**: {datasets_loaded}/{total_datasets} datasets loaded")
+
+# 3. Add visual progress and partition date
+st.sidebar.caption(f"Latest S3 Partition: `{latest_date}`")
+st.sidebar.progress(datasets_loaded / total_datasets)
+
+# 4. Provide detailed diagnostic dropdown
+with st.sidebar.expander("Diagnostic Details"):
+    for name, is_loaded in data_health.items():
+        icon = "🟢" if is_loaded else "🔴"
+        st.write(f"{icon} {name}")
+
 st.sidebar.divider()
 
 all_topics = sorted(topic_df["topic"].unique().tolist()) if not topic_df.empty else []
@@ -116,9 +153,9 @@ with row1_left:
             temporal_df.sort_values("year_month"),
             x="year_month", y="post_count", color="sentiment",
             labels={"year_month": "Month", "post_count": "Posts", "sentiment": "Sentiment"},
-            template="seaborn"
+            color_discrete_sequence=custom_colors
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No temporal data available.")
 
@@ -126,8 +163,14 @@ with row1_right:
     st.subheader("Topic Distribution")
     filtered_topics = topic_df[topic_df["topic"].isin(selected_topics)] if not topic_df.empty else pd.DataFrame()
     if not filtered_topics.empty:
-        fig = px.pie(filtered_topics, values="post_count", names="topic", hole=0.4)
-        st.plotly_chart(fig, use_container_width=True)
+        fig = px.pie(
+            filtered_topics, 
+            values="post_count", 
+            names="topic", 
+            hole=0.4,
+            color_discrete_sequence=custom_colors
+        )
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No topic data available.")
 
@@ -144,9 +187,9 @@ with row2_left:
             filtered_ind.sort_values("post_count", ascending=True),
             x="post_count", y="industry", orientation="h",
             labels={"post_count": "Posts", "industry": "Industry"},
-            template="seaborn"
+            color_discrete_sequence=[primary_color]
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No industry data available.")
 
@@ -158,9 +201,9 @@ with row2_right:
             top_skills.sort_values("skill_count", ascending=True),
             x="skill_count", y="skill", orientation="h",
             labels={"skill_count": "Mentions", "skill": "Skill"},
-            template="seaborn"
+            color_discrete_sequence=[primary_color]
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No skills data available.")
 
@@ -177,18 +220,24 @@ with row3_left:
             filtered_sent, x="topic", y="count", color="sentiment",
             barmode="group",
             labels={"count": "Posts", "topic": "Topic", "sentiment": "Sentiment"},
-            template="seaborn"
+            color_discrete_sequence=custom_colors
         )
         fig.update_xaxes(tickangle=30)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No sentiment data available.")
 
 with row3_right:
     st.subheader("Experience Level Distribution")
     if not experience_df.empty:
-        fig = px.pie(experience_df, values="post_count", names="experience_level", hole=0.3)
-        st.plotly_chart(fig, use_container_width=True)
+        fig = px.pie(
+            experience_df, 
+            values="post_count", 
+            names="experience_level", 
+            hole=0.3,
+            color_discrete_sequence=custom_colors
+        )
+        st.plotly_chart(fig, width='stretch')
     else:
         st.info("No experience data available.")
 
