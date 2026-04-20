@@ -33,7 +33,7 @@ Streamlit Community Cloud (app.py)
 
 **Conda (recommended):**
 ```bash
-conda env create -f environment.yml
+conda env create -f conda_requirements.yml
 conda activate reddit-career-analysis
 ```
 OR 
