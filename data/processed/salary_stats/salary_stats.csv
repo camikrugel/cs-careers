@@ -1,10 +1,11 @@
-industry,salary_mention_posts,avg_engagement_score,avg_comments,salary_mentions_list
-FAANG/Big Tech,15,1.1333333333333333,0.4,"[['4'], ['1', '1', '1', '2'], ['2'], ['20'], ['2'], ['2'], ['7'], ['202', '6'], ['2', '45'], ['4'], ['15'], ['202', '6'], ['202', '6', '31'], ['19'], ['61']]"
-Hardware/Semiconductor,12,130.66666666666666,15.333333333333334,"[['450', '300'], ['1', '1', '1', '2'], ['100', '100', '15'], ['4'], ['202', '6'], ['20'], ['15'], ['3', '5'], ['202', '6'], ['15'], ['202', '6', '31'], ['19']]"
-General/Unspecified,9,28.555555555555557,6.444444444444445,"[['20'], ['202', '6'], ['1'], ['78', '53'], ['202', '6'], ['25'], ['2'], ['48'], ['202', '6']]"
-FinTech/Finance,7,1.0,0.0,"[['4'], ['202', '6'], ['20'], ['202', '6'], ['3'], ['1', '5', '6', '5'], ['72']]"
-Gaming/Entertainment,7,2.5714285714285716,0.14285714285714285,"[['4'], ['2'], ['3'], ['1', '5', '6', '5'], ['7'], ['3', '5'], ['202', '6']]"
-Enterprise/Legacy,2,1.0,0.5,"[['6', '30,000', '12,000'], ['202', '6']]"
-Established Tech,2,1.5,0.0,"[['1'], ['202', '6']]"
-Consulting/Services,1,1.0,0.0,"[['202', '6']]"
-Early Stage Startup,1,1.0,0.0,"[['202', '6']]"
+industry,salary_mention_posts,avg_engagement_score,avg_comments,median_salary,min_salary,max_salary
+FAANG/Big Tech,19,1.0526315789473684,0.3157894736842105,,,
+Hardware/Semiconductor,13,139.92307692307693,15.23076923076923,,,
+General/Unspecified,10,59.3,9.3,,,
+Gaming/Entertainment,10,3.6,0.8,,,
+FinTech/Finance,8,3.125,0.875,,,
+Consulting/Services,2,1.0,0.0,,,
+Established Tech,2,1.5,0.0,,,
+E-commerce/Retail,1,18.0,7.0,,,
+Enterprise/Legacy,1,1.0,1.0,30000.0,30000.0,30000.0
+Early Stage Startup,1,1.0,0.0,,,

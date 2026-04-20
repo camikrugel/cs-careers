@@ -106,9 +106,11 @@ Salary mention analysis by industry — used for the salary table in the dashboa
 | salary_mention_posts | integer | Number of posts containing salary patterns |
 | avg_engagement_score | float | Average upvote score of salary-mentioning posts |
 | avg_comments | float | Average comments of salary-mentioning posts |
-| salary_mentions_list | list | Raw matched salary strings (e.g. `["$120k", "150000"]`) |
+| median_salary | float | Median parsed salary value in dollars (null if no parseable values) |
+| min_salary | float | Minimum parsed salary value (null if no parseable values) |
+| max_salary | float | Maximum parsed salary value (null if no parseable values) |
 
-**Salary patterns matched:** `$XXX,XXX`, `XXXk`, `$XXXk` (regex). Posts with no matches are excluded.
+**Salary patterns matched:** `$XXX,XXX`, `XXXk`, `$XXXk` (regex). Posts with no matches are excluded. Parsed values must be in the range $30,000–$1,000,000 to filter out non-salary numbers. The raw `salary_mentions_list` column is dropped before saving.
 
 ---
 
@@ -174,6 +176,50 @@ Overall dataset statistics — powers the four KPI cards at the top of the dashb
 
 ---
 
+## 9. company_mentions
+
+Top company mentions by post volume — powers the "Top Company Mentions" bar chart.
+
+| Column | Type | Description |
+|---|---|---|
+| company | string | Company display name (e.g. "Google", "Amazon") |
+| mention_count | integer | Number of posts mentioning this company |
+| avg_score | float | Average upvote score of posts mentioning this company |
+| avg_engagement | float | Average comment count of posts mentioning this company |
+
+**Companies tracked:** Amazon, Google, Meta, Microsoft, Apple, Netflix, Uber, Lyft, Airbnb, Salesforce, Oracle, IBM, Intel, NVIDIA, Tesla, Spotify, Twitter, Palantir, Stripe, Databricks, Snowflake, Citadel, Jane Street, Two Sigma, Goldman Sachs, JP Morgan, DoorDash, Instacart (29 total).
+
+---
+
+## 10. topic_by_industry
+
+Cross-analysis of topics and industries — powers the "Topics by Industry" grouped bar chart.
+
+| Column | Type | Description |
+|---|---|---|
+| industry | string | Industry category |
+| topic | string | Topic category |
+| post_count | integer | Number of posts in this industry+topic combination |
+| avg_score | float | Average upvote score |
+
+Posts can belong to multiple industries and topics (multi-label), so counts overlap.
+
+---
+
+## 11. skills_by_industry
+
+Top technical skills per industry — powers the "Skills by Industry" dropdown chart.
+
+| Column | Type | Description |
+|---|---|---|
+| industry | string | Industry category |
+| skill | string | Skill or technology name |
+| skill_count | integer | Number of posts in this industry mentioning this skill |
+
+A post mentioning both FAANG and Python contributes 1 count to `(FAANG/Big Tech, python)`. Posts can appear in multiple industry rows (multi-label).
+
+---
+
 ## File Locations
 
 ```
@@ -185,7 +231,10 @@ s3://bigdata-cs-careers/processed/YYYY-MM-DD/
 ├── experience_distribution/experience_distribution.csv
 ├── skills_summary/skills_summary.csv
 ├── temporal_trends/temporal_trends.csv
-└── network_metrics/network_metrics.csv
+├── network_metrics/network_metrics.csv
+├── company_mentions/company_mentions.csv
+├── topic_by_industry/topic_by_industry.csv
+└── skills_by_industry/skills_by_industry.csv
 
 data/processed/   (local mirror, same structure)
 ```
