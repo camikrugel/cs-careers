@@ -110,7 +110,7 @@ Salary mention analysis by industry — used for the salary table in the dashboa
 | min_salary | float | Minimum parsed salary value (null if no parseable values) |
 | max_salary | float | Maximum parsed salary value (null if no parseable values) |
 
-**Salary patterns matched:** `$XXX,XXX`, `XXXk`, `$XXXk` (regex). Posts with no matches are excluded. Parsed values must be in the range $30,000–$1,000,000 to filter out non-salary numbers. The raw `salary_mentions_list` column is dropped before saving.
+**Salary patterns matched:** `$XXX,XXX`, `XXXk`, `$XXXk` (annual); `$XX/hr`, `$XX/hour`, `$XX per hour`, `$XX an hour` (hourly). Hourly rates are annualized at 40 hrs/week × 52 weeks (×2080) before storing. Posts with no matches are excluded. Parsed values must be in the range $30,000–$1,000,000 to filter out non-salary numbers. The raw `salary_mentions_list` column is dropped before saving.
 
 ---
 

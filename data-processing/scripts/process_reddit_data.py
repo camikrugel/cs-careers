@@ -932,13 +932,20 @@ print(" Posts by Industry")
 
 # 3. salary_stats - extract salary mentions from text
 def extract_salary(text):
-    """Extract numerical salary values from text"""
+    """Extract salary values from text. Hourly rates tagged with 'h' suffix for annualization."""
     import re
     if not text:
         return []
-    salary_pattern = r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+k)'
-    matches = re.findall(salary_pattern, text, re.IGNORECASE)
-    return matches if matches else []
+    results = []
+    # Hourly patterns first: $45/hr, $45/hour, $45 per hour, $25 an hour
+    hourly_pattern = r'\$?(\d{1,3}(?:\.\d{1,2})?)(?:\s*(?:/hr|/hour|per hour|an hour|/h\b))'
+    for m in re.finditer(hourly_pattern, text, re.IGNORECASE):
+        results.append(m.group(1) + 'h')
+    # Annual patterns: $120,000 or $120k or 120k
+    annual_pattern = r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+k)'
+    for m in re.finditer(annual_pattern, text, re.IGNORECASE):
+        results.append(m.group(1))
+    return results if results else []
 
 salary_udf = udf(extract_salary, ArrayType(StringType()))
 
@@ -1116,6 +1123,12 @@ try:
 
             def _parse_sal(s):
                 s = str(s).strip().lower().replace('$', '').replace(',', '').replace(' ', '')
+                if s.endswith('h'):  # hourly rate — annualize at 40hr/week × 52 weeks
+                    try:
+                        v = float(s[:-1]) * 2080
+                        return v if 30000 <= v <= 1000000 else None
+                    except Exception:
+                        return None
                 if s.endswith('k'):
                     try:
                         v = float(s[:-1]) * 1000

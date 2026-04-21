@@ -162,7 +162,7 @@ Eleven CSV datasets written to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/`:
 | `topic_analysis/` | Post count, avg score, avg comments per topic |
 | `sentiment_by_topic/` | Positive/Neutral/Negative post counts per topic |
 | `posts_by_industry/` | Post volume and engagement by industry |
-| `salary_stats/` | Salary mention counts, engagement, and parsed salary values by industry |
+| `salary_stats/` | Salary mention counts, engagement, and parsed salary values by industry (hourly rates annualized at ×2080) |
 | `experience_distribution/` | Post counts by experience level |
 | `skills_summary/` | Most mentioned programming skills and tools |
 | `temporal_trends/` | Monthly post volume and sentiment over time |
