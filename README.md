@@ -8,20 +8,24 @@ Automated pipeline that collects Reddit discussions from r/csMajors and r/cscare
 
 ```
 python data-processing/scripts/collector.py   (run manually, local machine)
-  → collects posts from Reddit API
+  → loads seen post IDs from s3://bigdata-cs-careers/metadata/seen_ids.json
+  → collects new posts from Reddit API (skips already-collected IDs)
   → uploads to s3://bigdata-cs-careers/raw/YYYY-MM-DD/
+  → saves updated seen_ids.json back to S3
 
 python data-processing/scripts/process_reddit_data.py --date YYYY-MM-DD
-  → reads raw JSON from S3
+  → reads raw JSON from S3 (anonymous — public bucket)
   → PySpark local processing
-  → uploads 8 CSVs to s3://bigdata-cs-careers/processed/YYYY-MM-DD/
+  → uploads 11 CSVs directly to s3://bigdata-cs-careers/processed/YYYY-MM-DD/
+  → no local files written
 
 Streamlit Community Cloud (app.py)
-  → reads processed CSVs from S3 (public bucket, no credentials needed)
+  → reads all processed date folders from S3 (no credentials needed — public bucket)
+  → aggregates data across all collected dates
   → renders interactive dashboard
 ```
 
-> **Note:** The collector must be run from a local machine — Reddit blocks requests from AWS IP addresses (HTTP 403).
+> **Why not Lambda?** Lambda was the original plan for automated daily collection, but after 5 days of collecting data Reddit blocked us. We started receiving a HTTP 403 error even though the first collection runs were successful. Lambda functions run on AWS infrastructure, so every collection attempt fails immediately. The collector must run on a local machine (non-AWS IP) to reach the Reddit API.
 
 ---
 
@@ -91,6 +95,8 @@ s3://bigdata-cs-careers/raw/YYYY-MM-DD/posts.json
 s3://bigdata-cs-careers/raw/YYYY-MM-DD/metadata.json
 ```
 
+The collector also maintains a cumulative deduplication registry at `s3://bigdata-cs-careers/metadata/seen_ids.json` so the same post is never stored twice across different runs.
+
 **Runtime:** ~3–5 minutes (respects Reddit rate limits).
 
 > Requires active Learner Lab credentials (for S3 upload). Reddit credentials are not needed — the public API is used.
@@ -108,10 +114,9 @@ python data-processing/scripts/process_reddit_data.py --date 2026-04-20
 Replace the date with today's UTC date (defaults to today if omitted).
 
 **What it does:**
-1. Reads `raw/YYYY-MM-DD/posts.json` directly from S3 into memory
+1. Reads `raw/YYYY-MM-DD/posts.json` from S3 into memory (anonymous — bucket is public)
 2. Runs PySpark locally (single-threaded, 4 GB driver memory)
-3. Saves 8 CSV datasets to `data/processed/`
-4. Uploads all CSVs to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/`
+3. Uploads 11 CSV datasets directly to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/` (no local files written)
 
 **Runtime:** ~5–10 minutes.
 
@@ -135,7 +140,7 @@ done
 streamlit run app.py
 ```
 
-The app reads directly from the public S3 bucket — no credentials needed.
+The app reads directly from the public S3 bucket — no credentials needed. It automatically aggregates data across all processed dates in S3.
 
 ### Deployed on Streamlit Community Cloud
 
@@ -144,24 +149,27 @@ The app reads directly from the public S3 bucket — no credentials needed.
 3. Set main file to `app.py`
 4. Deploy — no secrets needed since the S3 bucket is public
 
-The app auto-detects the most recent processed date in S3 and loads all charts.
+The app auto-detects all processed dates in S3, aggregates across all of them, and renders all charts.
 
 ---
 
 ## Outputs
 
-Eight CSV datasets written to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/`:
+Eleven CSV datasets written to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/`:
 
 | Dataset | Description |
 |---|---|
 | `topic_analysis/` | Post count, avg score, avg comments per topic |
 | `sentiment_by_topic/` | Positive/Neutral/Negative post counts per topic |
 | `posts_by_industry/` | Post volume and engagement by industry |
-| `salary_stats/` | Salary mention counts and engagement by industry |
+| `salary_stats/` | Salary mention counts, engagement, and parsed salary values by industry |
 | `experience_distribution/` | Post counts by experience level |
 | `skills_summary/` | Most mentioned programming skills and tools |
 | `temporal_trends/` | Monthly post volume and sentiment over time |
 | `network_metrics/` | Overall dataset statistics (total posts, comments, etc.) |
+| `company_mentions/` | Top companies by mention count and engagement |
+| `topic_by_industry/` | Cross-analysis of topics discussed per industry |
+| `skills_by_industry/` | Top skills mentioned per industry |
 
 ---
 
@@ -171,7 +179,7 @@ Eight CSV datasets written to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/`:
 → Re-run `aws configure` and `aws configure set aws_session_token` with fresh Learner Lab credentials.
 
 **Collector gets HTTP 403 from Reddit**
-→ Reddit blocks AWS IP addresses. The collector must be run locally, not from Lambda.
+→ Reddit blocks AWS IP addresses. The collector must be run locally, not from any AWS compute service.
 
 **Processor fails with `NoCredentialsError`**
 → AWS CLI credentials have expired. Refresh them (see AWS Credentials Setup).

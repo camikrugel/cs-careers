@@ -46,7 +46,7 @@ Each element in the array is one Reddit post with these fields:
 
 ## Output Data
 
-All 8 CSV datasets are written to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/` and mirrored locally to `data/processed/`. Each dataset lives in its own subfolder with a matching filename (e.g. `topic_analysis/topic_analysis.csv`).
+All 11 CSV datasets are written directly to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/` (no local files). Each dataset lives in its own subfolder with a matching filename (e.g. `topic_analysis/topic_analysis.csv`).
 
 ---
 
@@ -249,10 +249,12 @@ data/processed/   (local mirror, same structure)
 
 ## Loading in Streamlit
 
+The S3 bucket is public — no credentials required.
+
 ```python
 import s3fs, pandas as pd
 
-fs = s3fs.S3FileSystem(key=..., secret=..., token=...)
+fs = s3fs.S3FileSystem(anon=True)
 
 with fs.open("bigdata-cs-careers/processed/2026-04-17/skills_summary/skills_summary.csv") as f:
     skills_df = pd.read_csv(f)

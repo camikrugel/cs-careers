@@ -15,6 +15,8 @@ import io
 import sys
 import argparse
 import boto3
+from botocore import UNSIGNED
+from botocore.config import Config
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,7 +40,7 @@ def load_from_s3(date_str):
     s3_key = f"raw/{date_str}/posts.json"
     print(f"\n[S3] Reading s3://{S3_BUCKET}/{s3_key} ...")
     try:
-        response = boto3.client("s3").get_object(Bucket=S3_BUCKET, Key=s3_key)
+        response = boto3.client("s3", config=Config(signature_version=UNSIGNED)).get_object(Bucket=S3_BUCKET, Key=s3_key)
         posts = json.loads(response["Body"].read().decode("utf-8"))
         print(f"     Loaded {len(posts)} posts")
         return posts
@@ -49,7 +51,7 @@ def load_from_s3(date_str):
 
 
 def upload_csv_to_s3(df, date_str, subfolder):
-    """Convert Spark DataFrame to CSV and upload directly to S3 (no local file)."""
+    """Convert Spark DataFrame to CSV and upload directly to S3."""
     try:
         count = df.count()
         print(f"\n {subfolder}: {count} rows")
@@ -75,7 +77,7 @@ def upload_csv_to_s3(df, date_str, subfolder):
 
 
 def upload_pandas_to_s3(pandas_df, date_str, subfolder):
-    """Upload a pandas DataFrame as CSV directly to S3 (no local file)."""
+    """Upload a pandas DataFrame as CSV directly to S3."""
     try:
         if pandas_df.empty:
             print(f"  WARNING: {subfolder} is empty! Skipping.")
