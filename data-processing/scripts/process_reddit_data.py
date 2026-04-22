@@ -11,9 +11,12 @@ from pyspark.ml import Pipeline
 import re
 import json
 import os
+import io
 import sys
 import argparse
 import boto3
+from botocore import UNSIGNED
+from botocore.config import Config
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,49 +35,76 @@ args = parser.parse_args()
 DATE_STR = args.date
 
 
-def download_from_s3(date_str):
-    """Download raw posts JSON from S3, or use local file if already present."""
-    os.makedirs("data", exist_ok=True)
-    local_dated = f"data/raw_posts_{date_str}.json"
-    if os.path.exists(local_dated):
-        print(f"\n[S3] Local file found, skipping download: {local_dated}")
-        return local_dated
+def load_from_s3(date_str):
+    """Read raw posts JSON directly from S3 into memory."""
     s3_key = f"raw/{date_str}/posts.json"
-    local_path = "data/raw_posts_temp.json"
-    print(f"\n[S3] Downloading s3://{S3_BUCKET}/{s3_key} ...")
-    boto3.client("s3").download_file(S3_BUCKET, s3_key, local_path)
-    print(f"     Saved to {local_path}")
-    return local_path
+    print(f"\n[S3] Reading s3://{S3_BUCKET}/{s3_key} ...")
+    try:
+        response = boto3.client("s3", config=Config(signature_version=UNSIGNED)).get_object(Bucket=S3_BUCKET, Key=s3_key)
+        posts = json.loads(response["Body"].read().decode("utf-8"))
+        print(f"     Loaded {len(posts)} posts")
+        return posts
+    except Exception as e:
+        print(f"     ERROR: {e}")
+        print(f"     No data found in S3 for {date_str}. Run collector.py first.")
+        sys.exit(1)
 
 
-def upload_processed_to_s3(date_str, local_dir="data/processed/"):
-    """Upload all processed CSVs from local_dir to s3://bucket/processed/{date}/."""
-    s3 = boto3.client("s3")
-    uploaded = 0
-    print(f"\n[S3] Uploading processed data to s3://{S3_BUCKET}/processed/{date_str}/")
-    for root, _, files in os.walk(local_dir):
-        for fname in files:
-            if not fname.endswith(".csv"):
-                continue
-            local_file = os.path.join(root, fname)
-            rel_path = os.path.relpath(local_file, local_dir).replace("\\", "/")
-            s3_key = f"processed/{date_str}/{rel_path}"
-            s3.upload_file(local_file, S3_BUCKET, s3_key)
-            print(f"     Uploaded {s3_key}")
-            uploaded += 1
-    print(f"[S3] Done — {uploaded} files uploaded.")
+def upload_csv_to_s3(df, date_str, subfolder):
+    """Convert Spark DataFrame to CSV and upload directly to S3."""
+    try:
+        count = df.count()
+        print(f"\n {subfolder}: {count} rows")
+        if count == 0:
+            print(f"  WARNING: {subfolder} is empty! Skipping.")
+            return False
+        buf = io.StringIO()
+        df.toPandas().to_csv(buf, index=False)
+        s3_key = f"processed/{date_str}/{subfolder}/{subfolder}.csv"
+        boto3.client("s3").put_object(
+            Bucket=S3_BUCKET,
+            Key=s3_key,
+            Body=buf.getvalue().encode("utf-8"),
+            ContentType="text/csv",
+        )
+        print(f"  Uploaded s3://{S3_BUCKET}/{s3_key}")
+        return True
+    except Exception as e:
+        print(f"  ERROR uploading {subfolder}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def upload_pandas_to_s3(pandas_df, date_str, subfolder):
+    """Upload a pandas DataFrame as CSV directly to S3."""
+    try:
+        if pandas_df.empty:
+            print(f"  WARNING: {subfolder} is empty! Skipping.")
+            return False
+        buf = io.StringIO()
+        pandas_df.to_csv(buf, index=False)
+        s3_key = f"processed/{date_str}/{subfolder}/{subfolder}.csv"
+        boto3.client("s3").put_object(
+            Bucket=S3_BUCKET,
+            Key=s3_key,
+            Body=buf.getvalue().encode("utf-8"),
+            ContentType="text/csv",
+        )
+        print(f"  Uploaded s3://{S3_BUCKET}/{s3_key} ({len(pandas_df)} rows)")
+        return True
+    except Exception as e:
+        print(f"  ERROR uploading {subfolder}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 
 # CONFIGURATION
-INPUT_PATH = download_from_s3(DATE_STR)
-OUTPUT_PATH = "data/processed/"
+RAW_POSTS = load_from_s3(DATE_STR)
 
 print(f"\n Processing date: {DATE_STR}")
-print(f"   Input:  {INPUT_PATH}")
-print(f"   Output: {OUTPUT_PATH}")
-
-# Ensure output directory exists
-os.makedirs(OUTPUT_PATH, exist_ok=True)
+print(f"   Output: s3://{S3_BUCKET}/processed/{DATE_STR}/")
 
 # Define all possible industries upfront 
 ALL_INDUSTRIES = [
@@ -169,25 +199,21 @@ spark.sparkContext.setLogLevel("WARN")
 print(f" Spark Session initialized")
 print(f"  Spark Version: {spark.version}")
 print(f"  Master: {spark.sparkContext.master}")
-print(f"  Input Path: {INPUT_PATH}")
-print(f"  Output Path: {OUTPUT_PATH}")
+print(f"  Output: s3://{S3_BUCKET}/processed/{DATE_STR}/")
 
 
 
 # 1. Load raw data
-print(f"\n[STEP 1] Loading raw Reddit data from: {INPUT_PATH}")
+print(f"\n[STEP 1] Loading raw Reddit data...")
 
 try:
-    with open(INPUT_PATH, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-    df = spark.createDataFrame(raw)
+    df = spark.createDataFrame(RAW_POSTS)
     initial_count = df.count()
     print(f" Loaded {initial_count} posts")
     print("\nData Schema:")
     df.printSchema()
 except Exception as e:
     print(f" Error loading data: {e}")
-    print("Make sure the input JSON file exists and contains a valid list of posts.")
     spark.stop()
     sys.exit(1)
 
@@ -906,15 +932,20 @@ print(" Posts by Industry")
 
 # 3. salary_stats - extract salary mentions from text
 def extract_salary(text):
-    """Extract numerical salary values from text"""
+    """Extract salary values from text. Hourly rates tagged with 'h' suffix for annualization."""
     import re
     if not text:
         return []
-    text_lower = text.lower()
-    # Look for salary patterns like $XXX,XXX or XXXk
-    salary_pattern = r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+k)'
-    matches = re.findall(salary_pattern, text, re.IGNORECASE)
-    return matches if matches else []
+    results = []
+    # Hourly patterns first: $45/hr, $45/hour, $45 per hour, $25 an hour
+    hourly_pattern = r'\$?(\d{1,3}(?:\.\d{1,2})?)(?:\s*(?:/hr|/hour|per hour|an hour|/h\b))'
+    for m in re.finditer(hourly_pattern, text, re.IGNORECASE):
+        results.append(m.group(1) + 'h')
+    # Annual patterns: $120,000 or $120k or 120k
+    annual_pattern = r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+k)'
+    for m in re.finditer(annual_pattern, text, re.IGNORECASE):
+        results.append(m.group(1))
+    return results if results else []
 
 salary_udf = udf(extract_salary, ArrayType(StringType()))
 
@@ -1018,6 +1049,26 @@ else:
 
 print(" Skills Summary")
 
+# skills_by_industry — top skills per industry
+df_si = df_categorized.withColumn(
+    "mentioned_skills", skills_udf(col("full_text"))
+).filter(size(col("mentioned_skills")) > 0).select(
+    "id",
+    explode(col("industries")).alias("industry"),
+    col("mentioned_skills")
+)
+
+df_si = df_si.select(
+    "id", "industry",
+    explode(col("mentioned_skills")).alias("skill")
+)
+
+skills_by_industry = df_si.groupBy("industry", "skill") \
+    .agg(count("*").alias("skill_count")) \
+    .orderBy("industry", desc("skill_count"))
+
+print(" Skills by Industry")
+
 # 6. temporal_trends - aggregate time series by month
 df_with_sentiment = df_sentiment.withColumn(
     "year_month",
@@ -1050,92 +1101,107 @@ network_metrics = spark.createDataFrame([
 print(" Network Metrics")
 
 
-# 12. save processed data
-print(f"\n[STEP 12] Saving processed data to: {OUTPUT_PATH}")
-
-import shutil
-import pandas
-
-def safe_write_csv(df, path, name):
-    """Write DataFrame to CSV with error handling 
-    - Uses Pandas for both LOCAL and EMR modes (local disk only)
-    - Creates single CSV files in /tmp/reddit-results/ or data/processed/
-    """
-    try:
-        full_path = f"{OUTPUT_PATH}{path}"
-        
-        # Check if DataFrame has data
-        count = df.count()
-        print(f"\n {name}: {count} rows")
-        
-        if count == 0:
-            print(f"  WARNING: {name} is empty! Skipping.")
-            return False
-        
-        # Use Pandas for both modes 
-        os.makedirs(full_path, exist_ok=True)
-        pandas_df = df.toPandas()
-        csv_file_path = os.path.join(full_path, f"{path}.csv")
-        pandas_df.to_csv(csv_file_path, index=False)
-        
-        if os.path.exists(csv_file_path):
-            print(f"  {name} saved to: {csv_file_path}")
-            print(f"   Rows: {len(pandas_df)}")
-            return True
-        else:
-            print(f"  {name} - file not created")
-            return False
-        
-    except Exception as e:
-        print(f"  ERROR saving {name}: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-# Save all datasets as CSV
-print("SAVING DATASETS AS CSV")
+# 12. Upload processed data directly to S3
+print(f"\n[STEP 12] Uploading processed data to s3://{S3_BUCKET}/processed/{DATE_STR}/")
 
 try:
     # 1. Topic Analysis
-    safe_write_csv(topic_distribution, "topic_analysis", "Topic Analysis")
-    
+    upload_csv_to_s3(topic_distribution, DATE_STR, "topic_analysis")
+
     # 2. Sentiment by Topic
-    safe_write_csv(sentiment_by_topic, "sentiment_by_topic", "Sentiment by Topic")
-    
+    upload_csv_to_s3(sentiment_by_topic, DATE_STR, "sentiment_by_topic")
+
     # 3. Posts by Industry
-    safe_write_csv(posts_by_industry, "posts_by_industry", "Posts by Industry")
-    
-    # 4. Salary Statistics
-    safe_write_csv(salary_stats, "salary_stats", "Salary Statistics")
-    
+    upload_csv_to_s3(posts_by_industry, DATE_STR, "posts_by_industry")
+
+    # 4. Salary Statistics — parse salary strings to numeric before uploading
+    try:
+        sal_count = salary_stats.count()
+        print(f"\n salary_stats: {sal_count} rows")
+        if sal_count > 0:
+            sal_pandas = salary_stats.toPandas()
+
+            def _parse_sal(s):
+                s = str(s).strip().lower().replace('$', '').replace(',', '').replace(' ', '')
+                if s.endswith('h'):  # hourly rate — annualize at 40hr/week × 52 weeks
+                    try:
+                        v = float(s[:-1]) * 2080
+                        return v if 30000 <= v <= 1000000 else None
+                    except Exception:
+                        return None
+                if s.endswith('k'):
+                    try:
+                        v = float(s[:-1]) * 1000
+                        return v if 30000 <= v <= 1000000 else None
+                    except Exception:
+                        return None
+                try:
+                    v = float(s)
+                    return v if 30000 <= v <= 1000000 else None
+                except Exception:
+                    return None
+
+            def _sal_stats(mentions_list):
+                vals = []
+                for item in (mentions_list or []):
+                    for s in (item if isinstance(item, list) else [item]):
+                        v = _parse_sal(s)
+                        if v is not None:
+                            vals.append(v)
+                if not vals:
+                    return None, None, None
+                vals.sort()
+                return vals[len(vals) // 2], vals[0], vals[-1]
+
+            tuples = sal_pandas['salary_mentions_list'].apply(_sal_stats)
+            sal_pandas['median_salary'] = tuples.apply(lambda x: x[0])
+            sal_pandas['min_salary'] = tuples.apply(lambda x: x[1])
+            sal_pandas['max_salary'] = tuples.apply(lambda x: x[2])
+            sal_pandas = sal_pandas.drop(columns=['salary_mentions_list'])
+            upload_pandas_to_s3(sal_pandas, DATE_STR, "salary_stats")
+        else:
+            print(f"  WARNING: salary_stats is empty! Skipping.")
+    except Exception as e:
+        print(f"  ERROR processing salary_stats: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
     # 5. Experience Distribution
-    safe_write_csv(experience_distribution, "experience_distribution", "Experience Distribution")
-    
+    upload_csv_to_s3(experience_distribution, DATE_STR, "experience_distribution")
+
     # 6. Skills Summary
-    safe_write_csv(skills_summary, "skills_summary", "Skills Summary")
-    
+    upload_csv_to_s3(skills_summary, DATE_STR, "skills_summary")
+
     # 7. Temporal Trends
-    safe_write_csv(temporal_trends, "temporal_trends", "Temporal Trends")
-    
+    upload_csv_to_s3(temporal_trends, DATE_STR, "temporal_trends")
+
     # 8. Network Metrics
-    safe_write_csv(network_metrics, "network_metrics", "Network Metrics")
-    
+    upload_csv_to_s3(network_metrics, DATE_STR, "network_metrics")
+
+    # 9. Company Mentions
+    upload_csv_to_s3(company_stats, DATE_STR, "company_mentions")
+
+    # 10. Topic by Industry
+    upload_csv_to_s3(topic_by_industry, DATE_STR, "topic_by_industry")
+
+    # 11. Skills by Industry
+    upload_csv_to_s3(skills_by_industry, DATE_STR, "skills_by_industry")
+
     print("\n" + "="*60)
-    print(" ALL DATASETS SAVED SUCCESSFULLY!")
+    print(" ALL DATASETS UPLOADED SUCCESSFULLY!")
     print("="*60)
-    print(f"\nOutput location: {OUTPUT_PATH}")
-    print("\nDatasets saved:")
-    print("  1. topic_analysis/")
-    print("  2. sentiment_by_topic/")
-    print("  3. posts_by_industry/")
-    print("  4. salary_stats/")
-    print("  5. experience_distribution/")
-    print("  6. skills_summary/")
-    print("  7. temporal_trends/")
-    print("  8. network_metrics/")
-    
+    print(f"\nS3 location: s3://{S3_BUCKET}/processed/{DATE_STR}/")
+    print("\nDatasets uploaded:")
+    for i, name in enumerate([
+        "topic_analysis", "sentiment_by_topic", "posts_by_industry",
+        "salary_stats", "experience_distribution", "skills_summary",
+        "temporal_trends", "network_metrics", "company_mentions",
+        "topic_by_industry", "skills_by_industry"
+    ], 1):
+        print(f"  {i:2}. {name}/")
+
 except Exception as e:
-    print(f"\n FATAL ERROR during save process:")
+    print(f"\n FATAL ERROR during upload process:")
     print(str(e))
     import traceback
     traceback.print_exc()
@@ -1178,6 +1244,4 @@ print("="*60)
 spark.stop()
 print("\n Spark session stopped. Analysis complete!")
 
-# Upload processed CSVs to S3
-upload_processed_to_s3(DATE_STR)
 

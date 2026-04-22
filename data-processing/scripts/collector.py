@@ -1,8 +1,8 @@
 import requests
 import time
 import json
-import os
 import boto3
+from botocore.exceptions import ClientError
 from datetime import datetime, timezone
 
 HEADERS = {"User-Agent": "cs-career-intel/1.0 (big data project)"}
@@ -11,6 +11,29 @@ LISTINGS = ["new", "top"]
 MAX_PAGES = 10
 LIMIT_PER_PAGE = 100
 S3_BUCKET = "bigdata-cs-careers"
+SEEN_IDS_KEY = "metadata/seen_ids.json"
+
+
+def load_seen_ids():
+    """Download the set of all previously collected post IDs from S3."""
+    try:
+        response = boto3.client("s3").get_object(Bucket=S3_BUCKET, Key=SEEN_IDS_KEY)
+        return set(json.loads(response["Body"].read().decode("utf-8")))
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
+            return set()
+        raise
+
+
+def save_seen_ids(seen_ids):
+    """Upload the updated set of all collected post IDs to S3."""
+    boto3.client("s3").put_object(
+        Bucket=S3_BUCKET,
+        Key=SEEN_IDS_KEY,
+        Body=json.dumps(list(seen_ids)).encode("utf-8"),
+        ContentType="application/json",
+    )
+    print(f"Updated seen_ids: {len(seen_ids)} total IDs tracked")
 
 
 def fetch_posts(subreddit, listing="new", limit_per_page=LIMIT_PER_PAGE, max_pages=MAX_PAGES):
@@ -67,19 +90,18 @@ def fetch_posts(subreddit, listing="new", limit_per_page=LIMIT_PER_PAGE, max_pag
     return posts
 
 
-def collect_all_posts():
+def collect_all_posts(global_seen_ids=None):
     all_posts = []
-    seen_ids = set()
+    seen_ids = set(global_seen_ids) if global_seen_ids else set()
 
     for sub in SUBREDDITS:
         for listing in LISTINGS:
             print(f"Fetching r/{sub}/{listing}...")
             batch = fetch_posts(sub, listing=listing)
-            # Deduplicate by post ID
             new_posts = [p for p in batch if p["id"] not in seen_ids]
             seen_ids.update(p["id"] for p in new_posts)
             all_posts.extend(new_posts)
-            print(f"  +{len(new_posts)} posts (total: {len(all_posts)})")
+            print(f"  +{len(new_posts)} new posts (total: {len(all_posts)})")
             time.sleep(2)
 
     return all_posts
@@ -118,35 +140,21 @@ def upload_to_s3(posts, date_str):
     return metadata
 
 
-def lambda_handler(event, context):
-    """AWS Lambda entrypoint — triggered daily by CloudWatch Events."""
+if __name__ == "__main__":
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     print(f"Starting collection for {today}")
 
-    posts = collect_all_posts()
-    print(f"Collected {len(posts)} unique posts")
+    print("\nLoading previously seen post IDs from S3...")
+    seen_ids = load_seen_ids()
+    print(f"  {len(seen_ids)} IDs already tracked across all previous runs")
 
-    metadata = upload_to_s3(posts, today)
-    return {"statusCode": 200, "body": json.dumps(metadata)}
+    posts = collect_all_posts(seen_ids)
+    print(f"\nNew unique posts collected: {len(posts)}")
 
-
-if __name__ == "__main__":
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    posts = collect_all_posts()
-    print(f"\nTotal unique posts collected: {len(posts)}")
-
-    # Save locally for the processor
-    os.makedirs("data", exist_ok=True)
-
-    dated_path = f"data/raw_posts_{today}.json"
-    with open(dated_path, "w", encoding="utf-8") as f:
-        json.dump(posts, f, ensure_ascii=False)
-    print(f"Saved to {dated_path}")
-
-    latest_path = "data/raw_posts.json"
-    with open(latest_path, "w", encoding="utf-8") as f:
-        json.dump(posts, f, ensure_ascii=False)
-    print(f"Saved to {latest_path} (for processor)")
-
-    # Upload to S3
-    upload_to_s3(posts, today)
+    if posts:
+        upload_to_s3(posts, today)
+        seen_ids.update(p["id"] for p in posts)
+        save_seen_ids(seen_ids)
+    else:
+        print("No new posts to upload — all fetched posts were already collected.")
+    print("Done.")

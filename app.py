@@ -7,35 +7,37 @@ st.set_page_config(page_title="Reddit CS Career Intelligence", layout="wide")
 
 S3_BUCKET = "bigdata-cs-careers"
 
-# Credentials from Streamlit secrets (set in app dashboard or .streamlit/secrets.toml locally)
-fs = s3fs.S3FileSystem(
-    key=st.secrets["aws"]["access_key_id"],
-    secret=st.secrets["aws"]["secret_access_key"],
-    token=st.secrets["aws"]["session_token"],
-)
+fs = s3fs.S3FileSystem(anon=True)
 
 
 @st.cache_data(ttl=3600)
-def detect_latest_processed_date():
-    """Return the most recent YYYY-MM-DD folder under processed/ in S3."""
-    prefix = f"{S3_BUCKET}/processed/"
+def get_all_processed_dates():
+    """Return sorted list of all YYYY-MM-DD folders under processed/ in S3."""
     try:
-        folders = fs.ls(prefix)
-        dates = sorted([f.split("/")[-1] for f in folders if f.split("/")[-1]])
-        return dates[-1] if dates else None
+        folders = fs.ls(f"{S3_BUCKET}/processed/")
+        return sorted([f.split("/")[-1] for f in folders if f.split("/")[-1]])
     except Exception:
-        return None
+        return []
 
 
 @st.cache_data(ttl=3600)
-def load_csv(subfolder, latest_date):
-    """Load a processed CSV from S3."""
-    path = f"{S3_BUCKET}/processed/{latest_date}/{subfolder}/{subfolder}.csv"
+def load_csv(subfolder, date):
+    """Load a single processed CSV from S3 for a specific date."""
+    path = f"{S3_BUCKET}/processed/{date}/{subfolder}/{subfolder}.csv"
     try:
         with fs.open(path) as f:
             return pd.read_csv(f)
     except Exception:
         return pd.DataFrame()
+
+
+@st.cache_data(ttl=3600)
+def load_all_dates(subfolder):
+    """Concatenate a CSV from every available processed date."""
+    dates = get_all_processed_dates()
+    frames = [load_csv(subfolder, d) for d in dates]
+    frames = [f for f in frames if not f.empty]
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 def data_missing():
@@ -46,20 +48,86 @@ def data_missing():
     st.stop()
 
 
-# --- Detect latest date ---
-latest_date = detect_latest_processed_date()
-if not latest_date:
+# --- Detect available dates ---
+all_dates = get_all_processed_dates()
+if not all_dates:
     data_missing()
 
-# --- Load all datasets ---
-topic_df      = load_csv("topic_analysis", latest_date)
-sentiment_df  = load_csv("sentiment_by_topic", latest_date)
-industry_df   = load_csv("posts_by_industry", latest_date)
-salary_df     = load_csv("salary_stats", latest_date)
-experience_df = load_csv("experience_distribution", latest_date)
-skills_df     = load_csv("skills_summary", latest_date)
-temporal_df   = load_csv("temporal_trends", latest_date)
-metrics_df    = load_csv("network_metrics", latest_date)
+# --- Load and aggregate all datasets across all dates ---
+def _agg(subfolder, groupby, agg_dict):
+    raw = load_all_dates(subfolder)
+    if raw.empty:
+        return pd.DataFrame()
+    return raw.groupby(groupby, as_index=False).agg(**agg_dict)
+
+
+topic_df = _agg("topic_analysis", "topic", {
+    "post_count": ("post_count", "sum"),
+    "avg_score": ("avg_score", "mean"),
+    "avg_comments": ("avg_comments", "mean"),
+})
+
+sentiment_df = _agg("sentiment_by_topic", ["topic", "sentiment"], {
+    "count": ("count", "sum"),
+})
+
+industry_df = _agg("posts_by_industry", "industry", {
+    "post_count": ("post_count", "sum"),
+    "avg_engagement_score": ("avg_engagement_score", "mean"),
+    "avg_comments_count": ("avg_comments_count", "mean"),
+})
+
+experience_df = _agg("experience_distribution", "experience_level", {
+    "post_count": ("post_count", "sum"),
+})
+
+skills_df = _agg("skills_summary", "skill", {
+    "skill_count": ("skill_count", "sum"),
+})
+
+temporal_df = _agg("temporal_trends", ["year_month", "sentiment"], {
+    "post_count": ("post_count", "sum"),
+    "avg_score": ("avg_score", "mean"),
+    "avg_comments": ("avg_comments", "mean"),
+})
+
+company_df = _agg("company_mentions", "company", {
+    "mention_count": ("mention_count", "sum"),
+    "avg_score": ("avg_score", "mean"),
+    "avg_engagement": ("avg_engagement", "mean"),
+})
+
+topic_ind_df = _agg("topic_by_industry", ["industry", "topic"], {
+    "post_count": ("post_count", "sum"),
+    "avg_score": ("avg_score", "mean"),
+})
+
+skills_ind_df = _agg("skills_by_industry", ["industry", "skill"], {
+    "skill_count": ("skill_count", "sum"),
+})
+
+# salary_stats needs special handling for optional median/min/max columns
+_sal_raw = load_all_dates("salary_stats")
+if not _sal_raw.empty:
+    _sal_agg = {"salary_mention_posts": ("salary_mention_posts", "sum"),
+                "avg_engagement_score": ("avg_engagement_score", "mean"),
+                "avg_comments": ("avg_comments", "mean")}
+    if "median_salary" in _sal_raw.columns:
+        _sal_agg["median_salary"] = ("median_salary", "mean")
+        _sal_agg["min_salary"] = ("min_salary", "min")
+        _sal_agg["max_salary"] = ("max_salary", "max")
+    salary_df = _sal_raw.groupby("industry", as_index=False).agg(**_sal_agg)
+else:
+    salary_df = pd.DataFrame()
+
+# network_metrics: sum totals, average the averages
+_met_raw = load_all_dates("network_metrics")
+if not _met_raw.empty:
+    _sum_rows = _met_raw[_met_raw["metric"].isin(["Total Posts", "Total Comments"])].groupby("metric", as_index=False)["value"].sum()
+    _avg_rows = _met_raw[_met_raw["metric"].isin(["Avg Score", "Avg Comments"])].groupby("metric", as_index=False)["value"].mean()
+    metrics_df = pd.concat([_sum_rows, _avg_rows], ignore_index=True)
+else:
+    metrics_df = pd.DataFrame()
 
 if metrics_df.empty:
     data_missing()
@@ -81,6 +149,8 @@ st.markdown("*Analyzing trends from r/csMajors and r/cscareerquestions using PyS
 
 # --- Sidebar ---
 st.sidebar.header("Pipeline Status")
+
+
 
 # 1. Evaluate the health of all 8 expected datasets
 data_health = {
@@ -106,7 +176,10 @@ else:
     st.sidebar.error(f"**Critical**: {datasets_loaded}/{total_datasets} datasets loaded")
 
 # 3. Add visual progress and partition date
-st.sidebar.caption(f"Latest S3 Partition: `{latest_date}`")
+if len(all_dates) == 1:
+    st.sidebar.success(f"Data from: `{all_dates[0]}`")
+else:
+    st.sidebar.success(f"`{all_dates[0]}` → `{all_dates[-1]}`\n\n{len(all_dates)} days aggregated")
 st.sidebar.progress(datasets_loaded / total_datasets)
 
 # 4. Provide detailed diagnostic dropdown
@@ -209,6 +282,26 @@ with row2_right:
 
 st.divider()
 
+# --- Skills by Industry ---
+st.subheader("Skills by Industry")
+st.markdown("*Select an industry to see which technical skills are discussed most.*")
+if not skills_ind_df.empty:
+    skill_industries = sorted(skills_ind_df["industry"].unique().tolist())
+    selected_skill_industry = st.selectbox("Select Industry", skill_industries)
+    filtered_si = skills_ind_df[skills_ind_df["industry"] == selected_skill_industry]
+    top_si = filtered_si.sort_values("skill_count", ascending=False).head(15)
+    fig = px.bar(
+        top_si.sort_values("skill_count", ascending=True),
+        x="skill_count", y="skill", orientation="h",
+        labels={"skill_count": "Mentions", "skill": "Skill"},
+        template="seaborn"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("No skills by industry data available. Re-run the processor to generate this dataset.")
+
+st.divider()
+
 # --- Row 3: Sentiment by topic + Experience distribution ---
 row3_left, row3_right = st.columns(2)
 
@@ -243,12 +336,64 @@ with row3_right:
 
 st.divider()
 
+# --- Row 4: Company Mentions + Topic by Industry ---
+row4_left, row4_right = st.columns(2)
+
+with row4_left:
+    st.subheader("Top Company Mentions")
+    if not company_df.empty:
+        top_companies = company_df.sort_values("mention_count", ascending=False).head(15)
+        fig = px.bar(
+            top_companies.sort_values("mention_count", ascending=True),
+            x="mention_count", y="company", orientation="h",
+            labels={"mention_count": "Mentions", "company": "Company"},
+            template="seaborn"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No company mention data available. Re-run the processor to generate this dataset.")
+
+with row4_right:
+    st.subheader("Topics by Industry")
+    if not topic_ind_df.empty:
+        filtered_ti = topic_ind_df[topic_ind_df["industry"].isin(selected_industries)]
+        if not filtered_ti.empty:
+            fig = px.bar(
+                filtered_ti, x="industry", y="post_count", color="topic",
+                barmode="group",
+                labels={"post_count": "Posts", "industry": "Industry", "topic": "Topic"},
+                template="seaborn"
+            )
+            fig.update_xaxes(tickangle=30)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No data for selected industries.")
+    else:
+        st.info("No topic by industry data available. Re-run the processor to generate this dataset.")
+
+st.divider()
+
 # --- Salary section ---
 st.subheader("Salary Mentions by Industry")
 filtered_sal = salary_df[salary_df["industry"].isin(selected_industries)] if not salary_df.empty else pd.DataFrame()
 if not filtered_sal.empty:
-    display_sal = filtered_sal[["industry", "salary_mention_posts", "avg_engagement_score", "avg_comments"]].copy()
-    display_sal.columns = ["Industry", "Posts w/ Salary", "Avg Score", "Avg Comments"]
+    if "median_salary" in filtered_sal.columns and filtered_sal["median_salary"].notna().any():
+        sal_chart = filtered_sal.dropna(subset=["median_salary"]).sort_values("median_salary", ascending=True)
+        fig = px.bar(
+            sal_chart,
+            x="median_salary", y="industry", orientation="h",
+            labels={"median_salary": "Median Salary ($)", "industry": "Industry"},
+            template="seaborn"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    base_cols = ["industry", "salary_mention_posts", "avg_engagement_score", "avg_comments"]
+    display_sal = filtered_sal[base_cols].copy()
+    col_names = ["Industry", "Posts w/ Salary", "Avg Score", "Avg Comments"]
+    if "median_salary" in filtered_sal.columns:
+        display_sal["median_salary"] = filtered_sal["median_salary"]
+        col_names.append("Median Salary ($)")
+    display_sal.columns = col_names
     st.dataframe(display_sal.sort_values("Posts w/ Salary", ascending=False), use_container_width=True)
 else:
     st.info("No salary data available.")

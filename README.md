@@ -1,33 +1,39 @@
 # Reddit CS Career Intelligence
 
-Automated pipeline that collects Reddit discussions from r/csMajors and r/cscareerquestions daily, processes them with PySpark, and visualizes career insights through a Streamlit dashboard hosted on Streamlit Community Cloud.
+Automated pipeline that collects Reddit discussions from r/csMajors and r/cscareerquestions, processes them with PySpark, and visualizes career insights through a Streamlit dashboard hosted on Streamlit Community Cloud.
 
 ---
 
 ## Architecture
 
 ```
-CloudWatch (daily 6 AM UTC)
-  → AWS Lambda (collector.py)
-  → s3://bigdata-cs-careers/raw/YYYY-MM-DD/posts.json
+python data-processing/scripts/collector.py   (run manually, local machine)
+  → loads seen post IDs from s3://bigdata-cs-careers/metadata/seen_ids.json
+  → collects new posts from Reddit API (skips already-collected IDs)
+  → uploads to s3://bigdata-cs-careers/raw/YYYY-MM-DD/
+  → saves updated seen_ids.json back to S3
 
-python process_reddit_data.py --date YYYY-MM-DD   (run manually)
-  → downloads raw JSON from S3
+python data-processing/scripts/process_reddit_data.py --date YYYY-MM-DD
+  → reads raw JSON from S3 (anonymous — public bucket)
   → PySpark local processing
-  → uploads 8 CSVs to s3://bigdata-cs-careers/processed/YYYY-MM-DD/
+  → uploads 11 CSVs directly to s3://bigdata-cs-careers/processed/YYYY-MM-DD/
+  → no local files written
 
 Streamlit Community Cloud (app.py)
-  → reads processed CSVs from S3 via s3fs
+  → reads all processed date folders from S3 (no credentials needed — public bucket)
+  → aggregates data across all collected dates
   → renders interactive dashboard
 ```
+
+> **Why not Lambda?** Lambda was the original plan for automated daily collection, but after 5 days of collecting data Reddit blocked us. We started receiving a HTTP 403 error even though the first collection runs were successful. Lambda functions run on AWS infrastructure, so every collection attempt fails immediately. The collector must run on a local machine (non-AWS IP) to reach the Reddit API.
 
 ---
 
 ## Prerequisites
 
 - Python 3.9+ with conda or pip
-- AWS Learner Lab session (active)
 - Java 8 or 11 (required by PySpark)
+- AWS Learner Lab session (active) — needed to upload to S3
 
 ### Install dependencies
 
@@ -36,7 +42,6 @@ Streamlit Community Cloud (app.py)
 conda env create -f conda_requirements.yml
 conda activate reddit-career-analysis
 ```
-OR 
 
 **Pip:**
 ```bash
@@ -47,13 +52,13 @@ pip install -r requirements.txt
 
 ## AWS Credentials Setup
 
-This project uses **AWS Academy Learner Lab**, which issues temporary STS credentials that expire every ~4 hours when the lab session ends. You must refresh credentials each new lab session.
+This project uses **AWS Academy Learner Lab**, which issues temporary STS credentials that expire every ~4 hours. You must refresh credentials each new lab session.
 
 ### Step 1 — Start your Learner Lab session
 In the AWS Academy portal, click **Start Lab** and wait for the indicator to turn green.
 
 ### Step 2 — Get your credentials
-Click **AWS Details** -> **Show** next to "AWS CLI". You will see three values:
+Click **AWS Details** → **Show** next to "AWS CLI". You will see three values:
 - `aws_access_key_id`
 - `aws_secret_access_key`
 - `aws_session_token`
@@ -74,159 +79,116 @@ Verify it works:
 aws s3 ls s3://bigdata-cs-careers/
 ```
 
-### Step 4 — Update Streamlit secrets
-Edit `.streamlit/secrets.toml` with the same three credential values:
-```toml
-[aws]
-access_key_id     = "YOUR_ACCESS_KEY_ID"
-secret_access_key = "YOUR_SECRET_ACCESS_KEY"
-session_token     = "YOUR_SESSION_TOKEN"
-```
-
-> **Note:** `.streamlit/secrets.toml` is gitignored and never committed. For the deployed Streamlit app, add these same values in the app dashboard under **Settings -> Secrets**.
-
 ---
 
-## AWS Lambda — Automated Daily Collection
+## Step 1 — Collect Data
 
-The Lambda function (`collector.py`) runs automatically every day at 6:00 AM UTC via a CloudWatch Events rule.
+Run the collector from your local machine:
 
-### Lambda function setup
+```bash
+python data-processing/scripts/collector.py
+```
 
-1. In the AWS Console, go to **Lambda -> Create function**
-   - Name: `cs-career-collector`
-   - Runtime: Python 3.9
-   - Execution role: `LabRole` (existing role — do not create a new one)
-
-2. Upload the deployment package:
-   ```bash
-   cd data-processing/scripts
-   zip collector_lambda.zip collector.py
-   ```
-   In the Lambda console: **Code → Upload from -> .zip file** → select `collector_lambda.zip`
-
-3. Add the `requests` layer or set the handler to include dependencies. Alternatively, build a full package:
-   ```bash
-   pip install requests -t package/
-   cp collector.py package/
-   cd package && zip -r ../collector_lambda.zip .
-   ```
-
-4. Set the handler to `collector.lambda_handler`
-
-5. Under **Configuration -> General**:
-   - Memory: 512 MB
-   - Timeout: 5 minutes
-
-### CloudWatch Events trigger (daily cron)
-
-1. In the Lambda console, click **Add trigger**
-2. Select **EventBridge (CloudWatch Events)**
-3. Create a new rule:
-   - Rule name: `cs-career-daily`
-   - Rule type: Schedule expression
-   - Expression: `cron(0 6 * * ? *)` — runs daily at 6:00 AM UTC
-4. Click **Add**
-
-### Test the Lambda function
-
-In the Lambda console, go to the **Test** tab:
-1. Create a new test event named `TestRun` with body `{}`
-2. Click **Test**
-
-Check the S3 bucket after it runs — you should see:
+This fetches up to ~2000 posts from r/csMajors and r/cscareerquestions and uploads them to:
 ```
 s3://bigdata-cs-careers/raw/YYYY-MM-DD/posts.json
 s3://bigdata-cs-careers/raw/YYYY-MM-DD/metadata.json
 ```
 
-### Run the collector manually (local)
+The collector also maintains a cumulative deduplication registry at `s3://bigdata-cs-careers/metadata/seen_ids.json` so the same post is never stored twice across different runs.
 
-You can also run the collector locally to collect and upload today's data:
-```bash
-python data-processing/scripts/collector.py
-```
-This saves data locally to `data/raw_posts_YYYY-MM-DD.json` and uploads to S3.
+**Runtime:** ~3–5 minutes (respects Reddit rate limits).
+
+> Requires active Learner Lab credentials (for S3 upload). Reddit credentials are not needed — the public API is used.
 
 ---
 
-## Processing Data
+## Step 2 — Process Data
 
-After data has been collected (either by Lambda or locally), run the processor:
+After collection, run the processor:
 
 ```bash
-python data-processing/scripts/process_reddit_data.py --date 2026-04-17
+python data-processing/scripts/process_reddit_data.py --date 2026-04-20
 ```
 
-Replace the date with the date you want to process. Defaults to today's UTC date if omitted.
+Replace the date with today's UTC date (defaults to today if omitted).
 
 **What it does:**
-1. Checks if `data/raw_posts_YYYY-MM-DD.json` exists locally — uses it if found (skips download)
-2. Otherwise downloads `raw/YYYY-MM-DD/posts.json` from S3
-3. Runs PySpark locally (single-threaded, 4 GB driver memory)
-4. Saves 8 CSV datasets to `data/processed/`
-5. Uploads all CSVs to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/`
+1. Reads `raw/YYYY-MM-DD/posts.json` from S3 into memory (anonymous — bucket is public)
+2. Runs PySpark locally (single-threaded, 4 GB driver memory)
+3. Uploads 11 CSV datasets directly to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/` (no local files written)
 
-**Runtime:** ~5–10 minutes depending on system specs.
+**Runtime:** ~5–10 minutes.
 
-> **Windows note:** The processor runs Spark in `local[1]` (single-threaded) mode to avoid Python UDF socket errors on Windows.
+> **Windows note:** Spark runs in `local[1]` (single-threaded) to avoid Python UDF socket errors on Windows.
+
+### Process multiple dates at once
+
+```bash
+for date in 2026-04-17 2026-04-18 2026-04-19 2026-04-20; do
+    python data-processing/scripts/process_reddit_data.py --date $date
+done
+```
 
 ---
 
-## Running the Streamlit Dashboard
+## Step 3 — View Dashboard
 
 ### Locally
-
-Make sure `.streamlit/secrets.toml` has valid credentials (see AWS Credentials Setup above), then:
 
 ```bash
 streamlit run app.py
 ```
 
-The app auto-detects the most recent processed date in S3 and loads all charts.
+The app reads directly from the public S3 bucket — no credentials needed. It automatically aggregates data across all processed dates in S3.
 
 ### Deployed on Streamlit Community Cloud
 
-1. Push code to GitHub (secrets.toml is gitignored — never committed)
-2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app** -> connect your repo
+1. Push code to GitHub
+2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app** → connect your repo
 3. Set main file to `app.py`
-4. Under **Settings -> Secrets**, paste the contents of your `.streamlit/secrets.toml`
-5. Deploy
+4. Deploy — no secrets needed since the S3 bucket is public
 
-> **Each new Learner Lab session:** update the secrets in the Streamlit app dashboard — credentials expire with the lab session.
+The app auto-detects all processed dates in S3, aggregates across all of them, and renders all charts.
 
 ---
 
 ## Outputs
 
-Eight CSV datasets are written to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/`:
+Eleven CSV datasets written to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/`:
 
 | Dataset | Description |
 |---|---|
 | `topic_analysis/` | Post count, avg score, avg comments per topic |
 | `sentiment_by_topic/` | Positive/Neutral/Negative post counts per topic |
 | `posts_by_industry/` | Post volume and engagement by industry |
-| `salary_stats/` | Salary mention counts and engagement by industry |
+| `salary_stats/` | Salary mention counts, engagement, and parsed salary values by industry (hourly rates annualized at ×2080) |
 | `experience_distribution/` | Post counts by experience level |
 | `skills_summary/` | Most mentioned programming skills and tools |
 | `temporal_trends/` | Monthly post volume and sentiment over time |
 | `network_metrics/` | Overall dataset statistics (total posts, comments, etc.) |
+| `company_mentions/` | Top companies by mention count and engagement |
+| `topic_by_industry/` | Cross-analysis of topics discussed per industry |
+| `skills_by_industry/` | Top skills mentioned per industry |
 
 ---
 
 ## Troubleshooting
 
-**`aws s3 ls` returns an error about credentials**
+**`aws s3 ls` returns a credentials error**
 → Re-run `aws configure` and `aws configure set aws_session_token` with fresh Learner Lab credentials.
+
+**Collector gets HTTP 403 from Reddit**
+→ Reddit blocks AWS IP addresses. The collector must be run locally, not from any AWS compute service.
 
 **Processor fails with `NoCredentialsError`**
 → AWS CLI credentials have expired. Refresh them (see AWS Credentials Setup).
 
-**Streamlit app shows "No processed data found in S3"**
-→ The processor has not been run for any date yet, or the S3 credentials in secrets.toml are expired.
+**Processor fails with `ERROR: Could not download...`**
+→ The collector has not been run for that date — no raw data exists in S3.
 
 **Spark fails with `SocketException: Software caused connection abort`**
-→ Ensure `local[1]` is set in the SparkSession (not `local[*]`) — this is a known Windows issue with multi-threaded Python UDFs.
+→ Ensure `local[1]` is set in the SparkSession — this is a known Windows issue with multi-threaded Python UDFs.
 
-**Lambda times out**
-→ Increase timeout to 10 minutes in Lambda configuration. Collection of ~2000 posts typically takes 90–120 seconds.
+**Streamlit shows "No processed data found in S3"**
+→ The processor has not been run yet for any date.
