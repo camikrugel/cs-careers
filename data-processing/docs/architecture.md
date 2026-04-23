@@ -97,7 +97,7 @@
 
 ## AWS Resources
 
-- **S3 bucket**: `bigdata-cs-careers` (public read, credentialed write)
+- **S3 bucket**: `bigdata-cs-careers`
   - `raw/` — raw Reddit posts per date
   - `processed/` — 11 CSV datasets per date
   - `metadata/seen_ids.json` — cumulative post ID registry for deduplication
