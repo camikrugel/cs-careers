@@ -262,7 +262,7 @@ with row2_left:
             labels={"post_count": "Posts", "industry": "Industry"},
             color_discrete_sequence=[primary_color]
         )
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width='stretch', key="posts_by_industry")
     else:
         st.info("No industry data available.")
 
@@ -276,7 +276,7 @@ with row2_right:
             labels={"skill_count": "Mentions", "skill": "Skill"},
             color_discrete_sequence=[primary_color]
         )
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width='stretch', key="top_skills")
     else:
         st.info("No skills data available.")
 
@@ -296,7 +296,7 @@ if not skills_ind_df.empty:
         labels={"skill_count": "Mentions", "skill": "Skill"},
         template="seaborn"
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="skills_by_industry")
 else:
     st.info("No skills by industry data available. Re-run the processor to generate this dataset.")
 
@@ -316,7 +316,7 @@ with row3_left:
             color_discrete_sequence=custom_colors
         )
         fig.update_xaxes(tickangle=30)
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width='stretch', key="sentiment_by_topic")
     else:
         st.info("No sentiment data available.")
 
@@ -349,7 +349,7 @@ with row4_left:
             labels={"mention_count": "Mentions", "company": "Company"},
             template="seaborn"
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="company_mentions")
     else:
         st.info("No company mention data available. Re-run the processor to generate this dataset.")
 
@@ -365,7 +365,7 @@ with row4_right:
                 template="seaborn"
             )
             fig.update_xaxes(tickangle=30)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="topics_by_industry")
         else:
             st.info("No data for selected industries.")
     else:
@@ -385,7 +385,7 @@ if not filtered_sal.empty:
             labels={"median_salary": "Median Salary ($)", "industry": "Industry"},
             template="seaborn"
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="salary_by_industry")
 
     base_cols = ["industry", "salary_mention_posts", "avg_engagement_score", "avg_comments"]
     display_sal = filtered_sal[base_cols].copy()

@@ -46,7 +46,7 @@ Each element in the array is one Reddit post with these fields:
 
 ## Output Data
 
-All 11 CSV datasets are written directly to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/` (no local files). Each dataset lives in its own subfolder with a matching filename (e.g. `topic_analysis/topic_analysis.csv`).
+All 11 CSV datasets are written directly to `s3://bigdata-cs-careers/processed/YYYY-MM-DD/`. Each dataset lives in its own subfolder with a matching filename (e.g. `topic_analysis/topic_analysis.csv`).
 
 ---
 
@@ -67,7 +67,7 @@ Post counts and engagement aggregated by topic category.
 
 ## 2. sentiment_by_topic
 
-Sentiment breakdown per topic — used for the grouped bar chart in the dashboard.
+Sentiment breakdown per topic 
 
 | Column | Type | Description |
 |---|---|---|
@@ -131,7 +131,7 @@ Detection is keyword-based (e.g. "new grad", "2 years", "senior engineer").
 
 ## 6. skills_summary
 
-Most mentioned technical skills — used for the top-15 horizontal bar chart.
+Most mentioned technical skills
 
 | Column | Type | Description |
 |---|---|---|
@@ -144,8 +144,7 @@ Most mentioned technical skills — used for the top-15 horizontal bar chart.
 
 ## 7. temporal_trends
 
-Monthly post volume by sentiment — used for the line chart in the dashboard.
-
+Monthly post volume by sentiment 
 | Column | Type | Description |
 |---|---|---|
 | year_month | string | Month in `YYYY-MM` format |
@@ -158,7 +157,7 @@ Monthly post volume by sentiment — used for the line chart in the dashboard.
 
 ## 8. network_metrics
 
-Overall dataset statistics — powers the four KPI cards at the top of the dashboard.
+Overall dataset statistics 
 
 | Column | Type | Description |
 |---|---|---|
@@ -235,27 +234,4 @@ s3://bigdata-cs-careers/processed/YYYY-MM-DD/
 ├── company_mentions/company_mentions.csv
 ├── topic_by_industry/topic_by_industry.csv
 └── skills_by_industry/skills_by_industry.csv
-
-data/processed/   (local mirror, same structure)
-```
-
-## Encoding
-
-- Format: CSV, UTF-8, comma-delimited
-- Written via pandas `.to_csv(index=False)`
-- One file per dataset (not Spark part files)
-
----
-
-## Loading in Streamlit
-
-The S3 bucket is public — no credentials required.
-
-```python
-import s3fs, pandas as pd
-
-fs = s3fs.S3FileSystem(anon=True)
-
-with fs.open("bigdata-cs-careers/processed/2026-04-17/skills_summary/skills_summary.csv") as f:
-    skills_df = pd.read_csv(f)
 ```
