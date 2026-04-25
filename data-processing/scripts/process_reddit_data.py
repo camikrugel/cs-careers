@@ -4,7 +4,7 @@ from pyspark.sql.functions import (
     from_unixtime, year, month, dayofmonth, hour, length, date_format, 
     when, trim, udf, collect_list, avg, sum as spark_sum, lit, size, row_number,
 )
-from pyspark.sql.types import StringType, ArrayType, StructType, StructField, IntegerType, DoubleType
+from pyspark.sql.types import StringType, ArrayType, StructType, StructField, IntegerType, DoubleType, LongType
 from pyspark.ml.feature import Tokenizer, StopWordsRemover, CountVectorizer, IDF
 from pyspark.sql.window import Window
 from pyspark.ml import Pipeline
@@ -937,17 +937,42 @@ def extract_salary(text):
     if not text:
         return []
     results = []
+        
     # Hourly patterns first: $45/hr, $45/hour, $45 per hour, $25 an hour
     hourly_pattern = r'\$?(\d{1,3}(?:\.\d{1,2})?)(?:\s*(?:/hr|/hour|per hour|an hour|/h\b))'
     for m in re.finditer(hourly_pattern, text, re.IGNORECASE):
+        print(f"Found potential salary mention: '{m.group(1)}' in text: '{text}'")
         results.append(m.group(1) + 'h')
     # Annual patterns: $120,000 or $120k or 120k
-    annual_pattern = r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+k)'
+    annual_pattern = r'(?:\$|\b)(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+k)'
     for m in re.finditer(annual_pattern, text, re.IGNORECASE):
-        results.append(m.group(1))
+        print(f"Found potential salary mention: '{m.group(1)}' in text: '{text}'")
+        annual  = m.group(1)
+        clean_val = annual.replace(',', '').lower()
+        if 'k' in clean_val or '$' in m.group(0) or (clean_val.isdigit() and int(clean_val) > 1000):
+            results.append(annual)
     return results if results else []
+    
+
+# 2. Normalization: Convert everything to a Float (Annual TC)
+def normalize_salary(salary_str):
+    if not salary_str: return None
+    s = salary_str.replace(',', '').replace('$', '').lower()
+    try:
+        if s.endswith('h'):
+            return float(s.replace('h', '')) * 2000 # 40hrs * 50 weeks
+        elif s.endswith('k'):
+            return float(s.replace('k', '')) * 1000
+        else:
+            val = float(s)
+            return val if val > 1000 else None # Final sanity check
+    except:
+        return None
 
 salary_udf = udf(extract_salary, ArrayType(StringType()))
+normalize_udf = udf(normalize_salary, DoubleType())
+
+# --- Processing Pipeline ---
 
 df_with_salary = df_filtered.withColumn(
     "salary_mentions",
@@ -955,27 +980,41 @@ df_with_salary = df_filtered.withColumn(
 ).filter(size(col("salary_mentions")) > 0)
 
 if df_with_salary.count() > 0:
-    df_salary_exploded = df_with_salary.select(
-        explode(col("industries")).alias("industry"),
-        col("salary_mentions"),
-        col("score"),
-        col("num_comments")
-    )
+    # Double Explode: first for industries, then for each salary mention in that post
+    df_salary_exploded = df_salary_exploded = df_with_salary \
+    .withColumn("industry", explode(col("industries"))) \
+    .withColumn("raw_salary", explode(col("salary_mentions"))) \
+    .select(
+        "industry",
+        "raw_salary",
+        "score",
+        "num_comments"
+    ) \
+    .withColumn("norm_salary", normalize_udf(col("raw_salary"))) \
+    .filter(col("norm_salary").isNotNull())
     
     salary_stats = df_salary_exploded.groupBy("industry") \
         .agg(
             count("*").alias("salary_mention_posts"),
             avg("score").alias("avg_engagement_score"),
             avg("num_comments").alias("avg_comments"),
-            collect_list("salary_mentions").alias("salary_mentions_list")
+            avg("norm_salary").alias("avg_annual_tc"), # The actual metric you want
+            collect_list("raw_salary").alias("salary_mentions_list")
         ) \
         .orderBy(desc("salary_mention_posts"))
 else:
-    # Create empty dataframe with correct schema if no salary mentions found
-    salary_stats = spark.createDataFrame(
-        [],
-        ["industry", "salary_mention_posts", "avg_engagement_score", "avg_comments", "salary_mentions_list"]
-    )
+    schema = StructType([
+        StructField("industry", StringType(), True),
+        StructField("salary_mention_posts", LongType(), True),
+        StructField("avg_engagement_score", DoubleType(), True),
+        StructField("avg_comments", DoubleType(), True),
+        StructField("avg_annual_tc", DoubleType(), True),
+        StructField("salary_mentions_list", ArrayType(StringType()), True)
+    ])
+    
+    salary_stats = spark.createDataFrame([], schema)
+
+salary_stats.show()
 
 print(" Salary Statistics")
 

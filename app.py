@@ -7,8 +7,7 @@ st.set_page_config(page_title="Reddit CS Career Intelligence", layout="wide")
 
 S3_BUCKET = "bigdata-cs-careers"
 
-fs = s3fs.S3FileSystem(anon=True)
-
+fs = s3fs.S3FileSystem(anon=False)
 
 @st.cache_data(ttl=3600)
 def get_all_processed_dates():
@@ -28,6 +27,7 @@ def load_csv(subfolder, date):
         with fs.open(path) as f:
             return pd.read_csv(f)
     except Exception:
+        print(f"Failed to load {path}")
         return pd.DataFrame()
 
 
@@ -108,14 +108,20 @@ skills_ind_df = _agg("skills_by_industry", ["industry", "skill"], {
 
 # salary_stats needs special handling for optional median/min/max columns
 _sal_raw = load_all_dates("salary_stats")
+
 if not _sal_raw.empty:
-    _sal_agg = {"salary_mention_posts": ("salary_mention_posts", "sum"),
-                "avg_engagement_score": ("avg_engagement_score", "mean"),
-                "avg_comments": ("avg_comments", "mean")}
-    if "median_salary" in _sal_raw.columns:
-        _sal_agg["median_salary"] = ("median_salary", "mean")
-        _sal_agg["min_salary"] = ("min_salary", "min")
-        _sal_agg["max_salary"] = ("max_salary", "max")
+    _sal_agg = {
+        "salary_mention_posts": ("salary_mention_posts", "sum"),
+        "avg_engagement_score": ("avg_engagement_score", "mean"),
+        "avg_comments": ("avg_comments", "mean")
+    }
+    
+    # Use 'avg_annual_tc' as the standard column name, but check for 'median_salary' too
+    if "avg_annual_tc" in _sal_raw.columns:
+        _sal_agg["avg_annual_tc"] = ("avg_annual_tc", "mean")
+    elif "median_salary" in _sal_raw.columns:
+        _sal_agg["avg_annual_tc"] = ("median_salary", "mean")
+
     salary_df = _sal_raw.groupby("industry", as_index=False).agg(**_sal_agg)
 else:
     salary_df = pd.DataFrame()
@@ -296,7 +302,7 @@ if not skills_ind_df.empty:
         labels={"skill_count": "Mentions", "skill": "Skill"},
         template="seaborn"
     )
-    st.plotly_chart(fig, use_container_width=True, key="skills_by_industry")
+    st.plotly_chart(fig, width='stretch', key="skills_by_industry")
 else:
     st.info("No skills by industry data available. Re-run the processor to generate this dataset.")
 
@@ -349,7 +355,7 @@ with row4_left:
             labels={"mention_count": "Mentions", "company": "Company"},
             template="seaborn"
         )
-        st.plotly_chart(fig, use_container_width=True, key="company_mentions")
+        st.plotly_chart(fig, width='stretch', key="company_mentions")
     else:
         st.info("No company mention data available. Re-run the processor to generate this dataset.")
 
@@ -365,7 +371,7 @@ with row4_right:
                 template="seaborn"
             )
             fig.update_xaxes(tickangle=30)
-            st.plotly_chart(fig, use_container_width=True, key="topics_by_industry")
+            st.plotly_chart(fig, width='stretch', key="topics_by_industry")
         else:
             st.info("No data for selected industries.")
     else:
@@ -375,26 +381,38 @@ st.divider()
 
 # --- Salary section ---
 st.subheader("Salary Mentions by Industry")
-filtered_sal = salary_df[salary_df["industry"].isin(selected_industries)] if not salary_df.empty else pd.DataFrame()
-if not filtered_sal.empty:
-    if "median_salary" in filtered_sal.columns and filtered_sal["median_salary"].notna().any():
-        sal_chart = filtered_sal.dropna(subset=["median_salary"]).sort_values("median_salary", ascending=True)
+if not salary_df.empty:
+    filtered_sal = salary_df[salary_df["industry"].isin(selected_industries)].copy()
+    
+    # We normalized everything to 'avg_annual_tc' in the agg step above
+    sal_col = "avg_annual_tc" 
+    if sal_col in filtered_sal.columns and filtered_sal[sal_col].notna().any():
+        sal_chart = filtered_sal.dropna(subset=[sal_col]).sort_values(sal_col, ascending=True)
         fig = px.bar(
             sal_chart,
-            x="median_salary", y="industry", orientation="h",
-            labels={"median_salary": "Median Salary ($)", "industry": "Industry"},
+            x=sal_col, y="industry", orientation="h",
+            labels={sal_col: "Average Annual TC ($)", "industry": "Industry"},
             template="seaborn"
         )
         st.plotly_chart(fig, use_container_width=True, key="salary_by_industry")
 
-    base_cols = ["industry", "salary_mention_posts", "avg_engagement_score", "avg_comments"]
-    display_sal = filtered_sal[base_cols].copy()
-    col_names = ["Industry", "Posts w/ Salary", "Avg Score", "Avg Comments"]
-    if "median_salary" in filtered_sal.columns:
-        display_sal["median_salary"] = filtered_sal["median_salary"]
-        col_names.append("Median Salary ($)")
-    display_sal.columns = col_names
-    st.dataframe(display_sal.sort_values("Posts w/ Salary", ascending=False), use_container_width=True)
+    # Dynamic Column Selection: This prevents the "Length Mismatch" error
+    column_mapping = {
+        "industry": "Industry",
+        "salary_mention_posts": "Posts w/ Salary",
+        "avg_annual_tc": "Average Salary ($)",
+        "avg_engagement_score": "Avg Score",
+        "avg_comments": "Avg Comments"
+    }
+
+    # Only select columns that actually have data
+    existing_cols = [c for c in column_mapping.keys() if c in filtered_sal.columns]
+    display_sal = filtered_sal[existing_cols].rename(columns=column_mapping)
+    
+    st.dataframe(
+        display_sal.sort_values("Posts w/ Salary", ascending=False), 
+        use_container_width=True
+    )
 else:
     st.info("No salary data available.")
 
