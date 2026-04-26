@@ -91,6 +91,19 @@ temporal_df = _agg("temporal_trends", ["year_month", "sentiment"], {
     "avg_comments": ("avg_comments", "mean"),
 })
 
+# Ensure all three sentiments appear for every month so all lines render
+if not temporal_df.empty:
+    _all_months = temporal_df["year_month"].unique()
+    _full_idx = pd.MultiIndex.from_product(
+        [_all_months, ["Positive", "Negative", "Neutral"]], names=["year_month", "sentiment"]
+    )
+    temporal_df = (
+        temporal_df.set_index(["year_month", "sentiment"])
+        .reindex(_full_idx)
+        .reset_index()
+    )
+    temporal_df["post_count"] = temporal_df["post_count"].fillna(0)
+
 company_df = _agg("company_mentions", "company", {
     "mention_count": ("mention_count", "sum"),
     "avg_score": ("avg_score", "mean"),
@@ -115,12 +128,16 @@ if not _sal_raw.empty:
         "avg_engagement_score": ("avg_engagement_score", "mean"),
         "avg_comments": ("avg_comments", "mean")
     }
-    
-    # Use 'avg_annual_tc' as the standard column name, but check for 'median_salary' too
+
     if "avg_annual_tc" in _sal_raw.columns:
         _sal_agg["avg_annual_tc"] = ("avg_annual_tc", "mean")
     elif "median_salary" in _sal_raw.columns:
         _sal_agg["avg_annual_tc"] = ("median_salary", "mean")
+
+    if "min_salary" in _sal_raw.columns:
+        _sal_agg["min_salary"] = ("min_salary", "min")
+    if "max_salary" in _sal_raw.columns:
+        _sal_agg["max_salary"] = ("max_salary", "max")
 
     salary_df = _sal_raw.groupby("industry", as_index=False).agg(**_sal_agg)
 else:
@@ -149,6 +166,13 @@ def metric_val(name):
 custom_colors = st.get_option("theme.chartCategoricalColors")
 primary_color = st.get_option("theme.primaryColor")
 
+_cc = custom_colors or []
+SENTIMENT_COLORS = {
+    "Positive": _cc[0] if len(_cc) > 0 else "#00CC96",
+    "Negative": _cc[1] if len(_cc) > 1 else "#EF553B",
+    "Neutral":  _cc[2] if len(_cc) > 2 else "#636EFA",
+}
+
 # --- Header ---
 st.title("Reddit CS Career Intelligence")
 st.markdown("*Analyzing trends from r/csMajors and r/cscareerquestions using PySpark & AWS S3.*")
@@ -158,7 +182,7 @@ st.sidebar.header("Pipeline Status")
 
 
 
-# 1. Evaluate the health of all 8 expected datasets
+# 1. Evaluate dataset health (all 11 datasets)
 data_health = {
     "Topic Analysis": not topic_df.empty,
     "Sentiment by Topic": not sentiment_df.empty,
@@ -168,6 +192,9 @@ data_health = {
     "Skills Summary": not skills_df.empty,
     "Temporal Trends": not temporal_df.empty,
     "Network Metrics": not metrics_df.empty,
+    "Company Mentions": not company_df.empty,
+    "Topic by Industry": not topic_ind_df.empty,
+    "Skills by Industry": not skills_ind_df.empty,
 }
 
 datasets_loaded = sum(data_health.values())
@@ -181,14 +208,7 @@ elif datasets_loaded > 0:
 else:
     st.sidebar.error(f"**Critical**: {datasets_loaded}/{total_datasets} datasets loaded")
 
-# 3. Add visual progress and partition date
-if len(all_dates) == 1:
-    st.sidebar.success(f"Data from: `{all_dates[0]}`")
-else:
-    st.sidebar.success(f"`{all_dates[0]}` → `{all_dates[-1]}`\n\n{len(all_dates)} days aggregated")
-st.sidebar.progress(datasets_loaded / total_datasets)
-
-# 4. Provide detailed diagnostic dropdown
+# 3. Provide detailed diagnostic dropdown
 with st.sidebar.expander("Diagnostic Details"):
     for name, is_loaded in data_health.items():
         icon = "🟢" if is_loaded else "🔴"
@@ -228,12 +248,28 @@ row1_left, row1_right = st.columns([2, 1])
 with row1_left:
     st.subheader("Sentiment Trend Over Time")
     if not temporal_df.empty:
-        fig = px.line(
-            temporal_df.sort_values("year_month"),
-            x="year_month", y="post_count", color="sentiment",
-            labels={"year_month": "Month", "post_count": "Posts", "sentiment": "Sentiment"},
-            color_discrete_sequence=custom_colors
+        metric_toggle = st.radio(
+            "Metric", ["Post Volume", "Avg Score"], horizontal=True, key="temporal_metric"
         )
+        if metric_toggle == "Post Volume":
+            fig = px.line(
+                temporal_df.sort_values("year_month"),
+                x="year_month", y="post_count", color="sentiment",
+                labels={"year_month": "Month", "post_count": "Posts", "sentiment": "Sentiment"},
+                color_discrete_map=SENTIMENT_COLORS,
+            )
+        else:
+            temporal_score = (
+                temporal_df.groupby("year_month", as_index=False)
+                .agg(avg_score=("avg_score", "mean"))
+                .sort_values("year_month")
+            )
+            fig = px.line(
+                temporal_score,
+                x="year_month", y="avg_score",
+                labels={"year_month": "Month", "avg_score": "Avg Score"},
+                color_discrete_sequence=[primary_color]
+            )
         st.plotly_chart(fig, width='stretch')
     else:
         st.info("No temporal data available.")
@@ -243,9 +279,9 @@ with row1_right:
     filtered_topics = topic_df[topic_df["topic"].isin(selected_topics)] if not topic_df.empty else pd.DataFrame()
     if not filtered_topics.empty:
         fig = px.pie(
-            filtered_topics, 
-            values="post_count", 
-            names="topic", 
+            filtered_topics,
+            values="post_count",
+            names="topic",
             hole=0.4,
             color_discrete_sequence=custom_colors
         )
@@ -265,8 +301,9 @@ with row2_left:
         fig = px.bar(
             filtered_ind.sort_values("post_count", ascending=True),
             x="post_count", y="industry", orientation="h",
-            labels={"post_count": "Posts", "industry": "Industry"},
-            color_discrete_sequence=[primary_color]
+            color="avg_engagement_score",
+            color_continuous_scale="Blues",
+            labels={"post_count": "Posts", "industry": "Industry", "avg_engagement_score": "Avg Score"},
         )
         st.plotly_chart(fig, width='stretch', key="posts_by_industry")
     else:
@@ -319,7 +356,7 @@ with row3_left:
             filtered_sent, x="topic", y="count", color="sentiment",
             barmode="group",
             labels={"count": "Posts", "topic": "Topic", "sentiment": "Sentiment"},
-            color_discrete_sequence=custom_colors
+            color_discrete_map=SENTIMENT_COLORS,
         )
         fig.update_xaxes(tickangle=30)
         st.plotly_chart(fig, width='stretch', key="sentiment_by_topic")
@@ -330,9 +367,9 @@ with row3_right:
     st.subheader("Experience Level Distribution")
     if not experience_df.empty:
         fig = px.pie(
-            experience_df, 
-            values="post_count", 
-            names="experience_level", 
+            experience_df,
+            values="post_count",
+            names="experience_level",
             hole=0.3,
             color_discrete_sequence=custom_colors
         )
@@ -342,7 +379,7 @@ with row3_right:
 
 st.divider()
 
-# --- Row 4: Company Mentions + Topic by Industry ---
+# --- Row 4: Company Mentions + Topic by Industry heatmap ---
 row4_left, row4_right = st.columns(2)
 
 with row4_left:
@@ -352,8 +389,9 @@ with row4_left:
         fig = px.bar(
             top_companies.sort_values("mention_count", ascending=True),
             x="mention_count", y="company", orientation="h",
-            labels={"mention_count": "Mentions", "company": "Company"},
-            template="seaborn"
+            color="avg_engagement",
+            color_continuous_scale="Oranges",
+            labels={"mention_count": "Mentions", "company": "Company", "avg_engagement": "Avg Comments"},
         )
         st.plotly_chart(fig, width='stretch', key="company_mentions")
     else:
@@ -383,34 +421,46 @@ st.divider()
 st.subheader("Salary Mentions by Industry")
 if not salary_df.empty:
     filtered_sal = salary_df[salary_df["industry"].isin(selected_industries)].copy()
-    
-    # We normalized everything to 'avg_annual_tc' in the agg step above
-    sal_col = "avg_annual_tc" 
+
+    sal_col = "avg_annual_tc"
     if sal_col in filtered_sal.columns and filtered_sal[sal_col].notna().any():
         sal_chart = filtered_sal.dropna(subset=[sal_col]).sort_values(sal_col, ascending=True)
-        fig = px.bar(
-            sal_chart,
-            x=sal_col, y="industry", orientation="h",
-            labels={sal_col: "Average Annual TC ($)", "industry": "Industry"},
-            template="seaborn"
-        )
+
+        has_range = "min_salary" in sal_chart.columns and "max_salary" in sal_chart.columns
+        if has_range:
+            sal_chart["err_plus"] = (sal_chart["max_salary"] - sal_chart[sal_col]).clip(lower=0)
+            sal_chart["err_minus"] = (sal_chart[sal_col] - sal_chart["min_salary"]).clip(lower=0)
+            fig = px.bar(
+                sal_chart,
+                x=sal_col, y="industry", orientation="h",
+                error_x="err_plus", error_x_minus="err_minus",
+                labels={sal_col: "Average Annual TC ($)", "industry": "Industry"},
+                color_discrete_sequence=[primary_color],
+            )
+        else:
+            fig = px.bar(
+                sal_chart,
+                x=sal_col, y="industry", orientation="h",
+                labels={sal_col: "Average Annual TC ($)", "industry": "Industry"},
+                color_discrete_sequence=[primary_color],
+            )
         st.plotly_chart(fig, use_container_width=True, key="salary_by_industry")
 
-    # Dynamic Column Selection: This prevents the "Length Mismatch" error
     column_mapping = {
         "industry": "Industry",
         "salary_mention_posts": "Posts w/ Salary",
         "avg_annual_tc": "Average Salary ($)",
+        "min_salary": "Min ($)",
+        "max_salary": "Max ($)",
         "avg_engagement_score": "Avg Score",
         "avg_comments": "Avg Comments"
     }
 
-    # Only select columns that actually have data
     existing_cols = [c for c in column_mapping.keys() if c in filtered_sal.columns]
     display_sal = filtered_sal[existing_cols].rename(columns=column_mapping)
-    
+
     st.dataframe(
-        display_sal.sort_values("Posts w/ Salary", ascending=False), 
+        display_sal.sort_values("Posts w/ Salary", ascending=False),
         use_container_width=True
     )
 else:

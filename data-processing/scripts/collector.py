@@ -11,7 +11,7 @@ LISTINGS = ["new", "top"]
 MAX_PAGES = 10
 LIMIT_PER_PAGE = 100
 S3_BUCKET = "bigdata-cs-careers"
-SEEN_IDS_KEY = "metadata/seen_ids.json"
+SEEN_IDS_KEY = "metadata/seen_ids_.json"
 
 
 def load_seen_ids():
